@@ -12,8 +12,11 @@ use std::{
 use clap_complete::{generate_to, shells::*};
 use clap::CommandFactory;
 
-// Include the cli.rs file directly
-include!("src/cli.rs");
+// Include cli.rs as a module
+mod cli {
+    // Use the full path to cli.rs
+    include!("src/cli.rs");
+}
 
 fn main() -> Result<()> {
     if let Err(e) = Command::new("scdoc")
@@ -57,7 +60,7 @@ fn main() -> Result<()> {
     }
 
     // Generate shell completions
-    let mut cmd = Cli::command(); // Get the Cli struct as a clap::Command
+    let mut cmd = cli::Cli::command(); // Get the Cli struct as a clap::Command
     let out_dir = "./completions"; // Directory to save completion scripts
 
     // Create the completions directory if it doesn't exist
