@@ -2,11 +2,18 @@ extern crate flate2;
 use eyre::{ContextCompat, Result};
 use flate2::{write::GzEncoder, Compression};
 use std::{
-    fs::{read_dir, File, OpenOptions},
+    fs::{create_dir_all, read_dir, File, OpenOptions},
     io::{copy, BufReader, ErrorKind},
     path::Path,
     process::{Command, Stdio},
 };
+
+// Add clap_complete imports
+use clap_complete::{generate_to, shells::*};
+use clap::CommandFactory;
+
+// Include the cli.rs file directly
+include!("src/cli.rs");
 
 fn main() -> Result<()> {
     if let Err(e) = Command::new("scdoc")
@@ -48,6 +55,20 @@ fn main() -> Result<()> {
         copy(&mut input, &mut encoder)?;
         encoder.finish()?;
     }
+
+    // Generate shell completions
+    let mut cmd = Cli::command(); // Get the Cli struct as a clap::Command
+    let out_dir = "./completions"; // Directory to save completion scripts
+
+    // Create the completions directory if it doesn't exist
+    create_dir_all(out_dir)?;
+
+    // Generate completions for all supported shells
+    generate_to(Bash, &mut cmd, "wayshot", out_dir)?;
+    generate_to(Zsh, &mut cmd, "wayshot", out_dir)?;
+    generate_to(Fish, &mut cmd, "wayshot", out_dir)?;
+    generate_to(PowerShell, &mut cmd, "wayshot", out_dir)?;
+    generate_to(Elvish, &mut cmd, "wayshot", out_dir)?;
 
     Ok(())
 }
