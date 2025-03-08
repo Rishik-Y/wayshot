@@ -1,44 +1,57 @@
 {
-  description = "Wayshot devel";
+  description = "Development environment for wayshot";
 
-  inputs = { nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
 
-  outputs = { self, nixpkgs, ... }:
-    let
-      pkgsFor = system:
-        import nixpkgs {
-          inherit system;
-          overlays = [ ];
-        };
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
 
-      targetSystems = [ "aarch64-linux" "x86_64-linux" ];
-    in {
-      devShells = nixpkgs.lib.genAttrs targetSystems (system:
-        let pkgs = pkgsFor system;
-        in {
-          default = pkgs.mkShell {
-            name = "Wayshot-devel";
-            nativeBuildInputs = with pkgs; [
-              # Compilers
-              cargo
-              rustc
-              scdoc
+        libPath = with pkgs; lib.makeLibraryPath [
+          libgbm
+          wayland
+          # Add Future libraries, this project depends on here
+        ];
+      in
+      {
+        devShells.default = pkgs.mkShell rec {
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = with pkgs; [
+            clang
+            llvmPackages.bintools
+            rustc
+            cargo
+            libGL.dev
+            libgbm
+            wayland.dev
+          ];
 
-              # Libs
-              wayland-protocols
-              wayland
+          LIBCLANG_PATH = pkgs.lib.makeLibraryPath [ pkgs.llvmPackages_latest.libclang.lib ];
+          LD_LIBRARY_PATH = libPath;
+          RUST_BACKTRACE = "1";
 
-              # Tools
-              wayland-scanner
-              clippy
-              gdb
-              gnumake
-              rust-analyzer
-              rustfmt
-              strace
-              valgrind
+          shellHook = ''
+            export PATH=$PATH:''${CARGO_HOME:-~/.cargo}/bin
+          '';
+
+          RUSTFLAGS = (builtins.map (a: ''-L ${a}/lib'') [
+          ]);
+
+		  #You probably Won't need to touch this code for the most part
+          BINDGEN_EXTRA_CLANG_ARGS =
+            (builtins.map (a: ''-I"${a}/include"'') [
+              pkgs.glibc.dev
+            ])
+            ++ [
+              ''-I"${pkgs.llvmPackages_latest.libclang.lib}/lib/clang/${pkgs.llvmPackages_latest.libclang.version}/include"''
+              ''-I"${pkgs.glib.dev}/include/glib-2.0"''
+              ''-I${pkgs.glib.out}/lib/glib-2.0/include/''
             ];
-          };
-        });
-    };
+        };
+      }
+    );
 }
