@@ -70,6 +70,8 @@ use wayland_client::{
     globals::{BindError, GlobalError},
 };
 
+use crate::region::{Size, Position, Region, LogicalRegion};
+
 /// This main state of HaruhiShot, We use it to do screen copy
 #[derive(Debug, Default)]
 pub struct HaruhiShotState {
@@ -163,12 +165,12 @@ impl TopLevel {
 
 #[derive(Debug, Default)]
 pub(crate) struct FrameInfo {
-    buffer_size: OnceLock<Size<u32>>,
+    buffer_size: OnceLock<Size>,
     shm_format: OnceLock<WEnum<Format>>,
 }
 
 impl FrameInfo {
-    pub(crate) fn size(&self) -> Size<u32> {
+    pub(crate) fn size(&self) -> Size {
         self.buffer_size.get().cloned().expect("not inited")
     }
 
@@ -242,13 +244,14 @@ impl LayerShellState {
 #[derive(Debug, Clone)]
 pub struct WlOutputInfo {
     pub(crate) output: WlOutput,
-    pub(crate) size: Size,
-    pub(crate) logical_size: Size,
-    pub(crate) position: Position,
-    pub(crate) name: String,
-    pub(crate) description: String,
+	pub(crate) name: String,
+	pub(crate) description: String,
+	pub(crate) transform: wl_output::Transform,
+	pub(crate) physical_size: Size,
+	
+    pub(crate) logical_region: LogicalRegion,
+	
     pub(crate) xdg_output: OnceLock<ZxdgOutputV1>,
-    pub(crate) transform: wl_output::Transform,
     pub(crate) scale: i32,
 }
 
@@ -261,9 +264,8 @@ impl WlOutputInfo {
     pub(crate) fn new(output: WlOutput) -> Self {
         Self {
             output,
-            position: Position::default(),
-            size: Size::default(),
-            logical_size: Size::default(),
+			logical_region: LogicalRegion::default(),
+            physical_size: Size::default(),
             name: "".to_owned(),
             description: "".to_owned(),
             xdg_output: OnceLock::new(),
@@ -271,45 +273,6 @@ impl WlOutputInfo {
             scale: 1,
         }
     }
-}
-
-/// Describe the size
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Size<T = i32>
-where
-    T: Default,
-{
-    pub width: T,
-    pub height: T,
-}
-
-/// Describe the position
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Position<T = i32>
-where
-    T: Default,
-{
-    pub x: T,
-    pub y: T,
-}
-
-impl<T> Sub for Position<T>
-where
-    T: Sub<Output = T> + Default,
-{
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self {
-            x: self.x - rhs.x,
-            y: self.y - rhs.y,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Region {
-	pub position: Position,
-	pub size: Size,
 }
 
 /// Describe the capture option
@@ -331,12 +294,10 @@ impl From<CaptureOption> for Options {
     }
 }
 
-
 struct AreaShotInfo {
 	data: CaptureOutputData,
 	mem_file: File,
 }
-
 
 impl AreaShotInfo {
 	fn in_this_screen(
@@ -385,8 +346,8 @@ impl AreaShotInfo {
 		Some(Region {
 			position,
 			size: Size {
-				width: (size.width as f64 * width as f64 / real_width as f64) as i32,
-				height: (size.height as f64 * height as f64 / real_height as f64) as i32,
+				width: (size.width as f64 * width as f64 / real_width as f64) as u32,
+				height: (size.height as f64 * height as f64 / real_height as f64) as u32,
 			},
 		})
 	}
@@ -513,12 +474,22 @@ impl HaruhiShotState {
         &mut self,
         WlOutputInfo {
             output,
-            logical_size:
-                Size {
-                    width: real_width,
-                    height: real_height,
-                },
-            position: screen_position,
+			logical_region:
+				LogicalRegion {
+					inner: Region {
+						position: screen_position,
+						size: Size {
+							width: real_width,
+							height: real_height,
+						},
+					},
+				},
+//			logical_size:
+//                Size {
+//                    width: real_width,
+//                    height: real_height,
+//                },
+//            position: screen_position,
             ..
         }: WlOutputInfo,
         option: CaptureOption,
@@ -627,7 +598,7 @@ impl HaruhiShotState {
         })
     }
 
-	pub fn ext_capture_area<F>(
+	pub fn ext_capture_area2<F>(
 		&mut self,
 		option: CaptureOption,
 		callback: F,
@@ -757,7 +728,7 @@ fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
                     fd.as_fd(),
                     fcntl::F_ADD_SEALS(
                         fcntl::SealFlag::F_SEAL_SHRINK | fcntl::SealFlag::F_SEAL_SEAL,
-                    ),
+					),
                 );
                 return Ok(fd);
             }
@@ -892,10 +863,10 @@ impl Dispatch<ZxdgOutputV1, ()> for HaruhiShotState {
         };
 
         match event {
-            zxdg_output_v1::Event::LogicalPosition { x, y } => data.position = Position { x, y },
+            zxdg_output_v1::Event::LogicalPosition { x, y } => data.logical_region.inner.position = Position { x, y },
             zxdg_output_v1::Event::LogicalSize { width, height } => {
-                data.logical_size = Size { width, height };
-            }
+				data.logical_region.inner.size = Size {  width: width as u32, height: height as u32 }
+			}
             zxdg_output_v1::Event::Description { description } => {
                 data.description = description;
             }
@@ -1008,7 +979,7 @@ impl Dispatch<WlOutput, ()> for HaruhiShotState {
                 data.scale = factor;
             }
             wl_output::Event::Mode { width, height, .. } => {
-                data.size = Size { width, height };
+                data.physical_size = Size { width: width as u32, height: height as u32 };
             }
             wl_output::Event::Geometry {
                 transform: WEnum::Value(transform),
