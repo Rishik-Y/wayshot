@@ -248,9 +248,9 @@ pub struct WlOutputInfo {
 	pub(crate) description: String,
 	pub(crate) transform: wl_output::Transform,
 	pub(crate) physical_size: Size,
-	
+
     pub(crate) logical_region: LogicalRegion,
-	
+
     pub(crate) xdg_output: OnceLock<ZxdgOutputV1>,
     pub(crate) scale: i32,
 }
@@ -350,6 +350,77 @@ impl AreaShotInfo {
 				height: (size.height as f64 * height as f64 / real_height as f64) as u32,
 			},
 		})
+	}
+}
+
+// Replace the layer shell imports with xdg_shell imports
+use wayland_protocols::xdg::shell::client::{
+	xdg_wm_base::{self, XdgWmBase},
+	xdg_surface::{self, XdgSurface},
+	xdg_toplevel::{self, XdgToplevel},
+};
+
+#[derive(Debug)]
+pub(crate) struct XdgShellState {
+	pub configured_surfaces: HashSet<XdgSurface>,
+}
+
+impl XdgShellState {
+	pub(crate) fn new() -> Self {
+		Self {
+			configured_surfaces: HashSet::new(),
+		}
+	}
+}
+
+// Replace the LayerShellState dispatch implementations with XdgShell ones
+delegate_noop!(XdgShellState: ignore WlCompositor);
+delegate_noop!(XdgShellState: ignore WlShm);
+delegate_noop!(XdgShellState: ignore WlShmPool);
+delegate_noop!(XdgShellState: ignore WlBuffer);
+//delegate_noop!(XdgShellState: ignore XdgWmBase);
+delegate_noop!(XdgShellState: ignore WlSurface);
+delegate_noop!(XdgShellState: ignore WpViewport);
+delegate_noop!(XdgShellState: ignore WpViewporter);
+delegate_noop!(XdgShellState: ignore XdgToplevel);
+
+impl Dispatch<XdgSurface, WlOutput> for XdgShellState {
+	fn event(
+		state: &mut Self,
+		proxy: &XdgSurface,
+		event: <XdgSurface as Proxy>::Event,
+		_data: &WlOutput,
+		_conn: &Connection,
+		_qhandle: &QueueHandle<Self>,
+	) {
+		match event {
+			xdg_surface::Event::Configure { serial } => {
+				tracing::debug!("Acking XDG surface configure");
+				state.configured_surfaces.insert(proxy.clone());
+				proxy.ack_configure(serial);
+				tracing::trace!("Acked XDG surface configure");
+			}
+			_ => {}
+		}
+	}
+}
+
+// Add XdgWmBase ping handling
+impl Dispatch<XdgWmBase, ()> for XdgShellState {
+	fn event(
+		_state: &mut Self,
+		proxy: &XdgWmBase,
+		event: <XdgWmBase as Proxy>::Event,
+		_data: &(),
+		_conn: &Connection,
+		_qhandle: &QueueHandle<Self>,
+	) {
+		match event {
+			xdg_wm_base::Event::Ping { serial } => {
+				proxy.pong(serial);
+			}
+			_ => {}
+		}
 	}
 }
 
@@ -617,14 +688,16 @@ impl HaruhiShotState {
 			data_list.push(AreaShotInfo { data, mem_file })
 		}
 
-		let mut state = LayerShellState::new();
-		let mut event_queue: EventQueue<LayerShellState> = self.connection().new_event_queue();
+		let mut state = XdgShellState::new();
+		let mut event_queue: EventQueue<XdgShellState> = self.connection().new_event_queue();
 		let globals = self.globals();
 		let qh = event_queue.handle();
+
 		let compositor = globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ())?;
-		let layer_shell = globals.bind::<ZwlrLayerShellV1, _, _>(&qh, 1..=1, ())?;
+		let xdg_wm_base = globals.bind::<XdgWmBase, _, _>(&qh, 1..=1, ())?;
 		let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ())?;
-		let mut layer_shell_surfaces: Vec<(WlSurface, ZwlrLayerSurfaceV1)> =
+
+		let mut xdg_surfaces: Vec<(WlSurface, XdgSurface, XdgToplevel)> =
 			Vec::with_capacity(data_list.len());
 		for AreaShotInfo { data, .. } in data_list.iter() {
 			let CaptureOutputData {
@@ -637,24 +710,19 @@ impl HaruhiShotState {
 			} = data;
 			let surface = compositor.create_surface(&qh, ());
 
-			let layer_surface = layer_shell.get_layer_surface(
-				&surface,
-				Some(output),
-				Layer::Top,
-				"wayshot".to_string(),
-				&qh,
-				output.clone(),
-			);
+			let xdg_surface = xdg_wm_base.get_xdg_surface(&surface, &qh, output.clone());
+			let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
 
-			layer_surface.set_exclusive_zone(-1);
-			layer_surface.set_anchor(Anchor::all());
-			layer_surface.set_margin(0, 0, 0, 0);
+			// Configure the toplevel to be fullscreen on the specific output
+			xdg_toplevel.set_fullscreen(Some(output));
+			xdg_toplevel.set_title("wayshot-overlay".to_string());
+			xdg_toplevel.set_app_id("wayshot".to_string());
 
 			debug!("Committing surface creation changes.");
 			surface.commit();
 
 			debug!("Waiting for layer surface to be configured.");
-			while !state.configured_outputs.contains(output) {
+			while !state.configured_surfaces.contains(&xdg_surface) {
 				event_queue.blocking_dispatch(&mut state)?;
 			}
 
@@ -667,17 +735,18 @@ impl HaruhiShotState {
 
 			debug!("Committing surface with attached buffer.");
 			surface.commit();
-			layer_shell_surfaces.push((surface, layer_surface));
+			xdg_surfaces.push((surface, xdg_surface, xdg_toplevel));
 			event_queue.blocking_dispatch(&mut state)?;
 		}
 
 		let region_re = callback.slurp(self);
 
 		debug!("Unmapping and destroying layer shell surfaces.");
-		for (surface, layer_shell_surface) in layer_shell_surfaces.iter() {
+		for (surface, xdg_surface, xdg_toplevel) in xdg_surfaces.iter() {
 			surface.attach(None, 0, 0);
-			surface.commit(); //unmap surface by committing a null buffer
-			layer_shell_surface.destroy();
+			surface.commit(); // unmap surface by committing a null buffer
+			xdg_toplevel.destroy();
+			xdg_surface.destroy();
 		}
 		event_queue.roundtrip(&mut state)?;
 		let region = region_re?;
