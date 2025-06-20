@@ -37,7 +37,7 @@ use wayland_protocols::xdg::xdg_output::zv1::client::{
     zxdg_output_v1::{self, ZxdgOutputV1},
 };
 
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, RwLock};
 
 use std::ops::Sub;
 
@@ -69,17 +69,33 @@ use crate::region::{LogicalRegion, Position, Region, Size};
 use crate::output::OutputInfo;
 
 /// This main state of HaruhiShot, We use it to do screen copy
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct HaruhiShotState {
-    toplevels: Vec<TopLevel>,
-    output_infos: Vec<OutputInfo>,
-    img_copy_manager: OnceLock<ExtImageCopyCaptureManagerV1>,
-    output_image_manager: OnceLock<ExtOutputImageCaptureSourceManagerV1>,
-    shm: OnceLock<WlShm>,
-    qh: OnceLock<QueueHandle<Self>>,
+	conn: Option<Connection>,
+	globals: Option<GlobalList>,
+	output_infos: Vec<OutputInfo>,
+	toplevels: Vec<TopLevel>,
+    img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
+    output_image_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
+    shm: Option<WlShm>,
+    qh: Option<QueueHandle<Self>>,
     event_queue: Option<EventQueue<Self>>,
-    conn: OnceLock<Connection>,
-    globals: OnceLock<GlobalList>,
+}
+
+impl Default for HaruhiShotState {
+    fn default() -> Self {
+        Self {
+            conn: None,
+            globals: None,
+            output_infos: Vec::new(),
+            toplevels: Vec::new(),
+            img_copy_manager: None,
+            output_image_manager: None,
+            shm: None,
+            qh: None,
+            event_queue: None,
+        }
+    }
 }
 
 /// Image view means what part to use
@@ -161,17 +177,17 @@ impl TopLevel {
 
 #[derive(Debug, Default)]
 pub(crate) struct FrameInfo {
-    buffer_size: OnceLock<Size>,
-    shm_format: OnceLock<WEnum<Format>>,
+    buffer_size: Option<Size>,
+    shm_format: Option<WEnum<Format>>,
 }
 
 impl FrameInfo {
     pub(crate) fn size(&self) -> Size {
-        self.buffer_size.get().cloned().expect("not inited")
+        self.buffer_size.clone().expect("not inited")
     }
 
     pub(crate) fn format(&self) -> WEnum<Format> {
-        self.shm_format.get().cloned().expect("Not inited")
+        self.shm_format.clone().expect("Not inited")
     }
 }
 
@@ -222,19 +238,6 @@ impl AreaSelectCallback for Region {
 }
 
 use std::collections::HashSet;
-
-#[derive(Debug)]
-pub(crate) struct LayerShellState {
-    pub configured_outputs: HashSet<WlOutput>,
-}
-
-impl LayerShellState {
-    pub(crate) fn new() -> Self {
-        Self {
-            configured_outputs: HashSet::new(),
-        }
-    }
-}
 
 /// Describe the capture option
 /// Now this library provide two options
@@ -339,7 +342,6 @@ delegate_noop!(XdgShellState: ignore WlCompositor);
 delegate_noop!(XdgShellState: ignore WlShm);
 delegate_noop!(XdgShellState: ignore WlShmPool);
 delegate_noop!(XdgShellState: ignore WlBuffer);
-//delegate_noop!(XdgShellState: ignore XdgWmBase);
 delegate_noop!(XdgShellState: ignore WlSurface);
 delegate_noop!(XdgShellState: ignore WpViewport);
 delegate_noop!(XdgShellState: ignore WpViewporter);
@@ -400,15 +402,15 @@ impl HaruhiShotState {
     }
 
     pub(crate) fn output_image_manager(&self) -> &ExtOutputImageCaptureSourceManagerV1 {
-        self.output_image_manager.get().expect("Should init")
+        self.output_image_manager.as_ref().expect("Should init")
     }
 
     pub(crate) fn image_copy_capture_manager(&self) -> &ExtImageCopyCaptureManagerV1 {
-        self.img_copy_manager.get().expect("Should init")
+        self.img_copy_manager.as_ref().expect("Should init")
     }
 
     pub(crate) fn qhandle(&self) -> &QueueHandle<Self> {
-        self.qh.get().expect("Should init")
+        self.qh.as_ref().expect("Should init")
     }
 
     pub fn new_with_connection(connection: Connection) -> Result<Self, HaruhiError> {
@@ -416,7 +418,7 @@ impl HaruhiShotState {
     }
 
     pub(crate) fn shm(&self) -> &WlShm {
-        self.shm.get().expect("Should init")
+        self.shm.as_ref().expect("Should init")
     }
 
     pub(crate) fn reset_event_queue(&mut self, event_queue: EventQueue<Self>) {
@@ -424,11 +426,11 @@ impl HaruhiShotState {
     }
 
     pub fn connection(&self) -> &Connection {
-        self.conn.get().expect("should init")
+        self.conn.as_ref().expect("should init")
     }
 
     pub fn globals(&self) -> &GlobalList {
-        self.globals.get().expect("should init")
+        self.globals.as_ref().expect("should init")
     }
 
     fn init(connection: Option<Connection>) -> Result<Self, HaruhiError> {
@@ -461,15 +463,12 @@ impl HaruhiShotState {
 
         event_queue.blocking_dispatch(&mut state)?;
 
-        state.img_copy_manager.set(image_manager).unwrap();
-        state
-            .output_image_manager
-            .set(output_image_manager)
-            .unwrap();
-        state.qh.set(qh).unwrap();
-        state.shm.set(shm).unwrap();
-        state.globals.set(globals).unwrap();
-        state.conn.set(conn).unwrap();
+        state.img_copy_manager = Some(image_manager);
+        state.output_image_manager = Some(output_image_manager);
+        state.qh = Some(qh);
+        state.shm = Some(shm);
+        state.globals = Some(globals);
+        state.conn = Some(conn);
         state.event_queue = Some(event_queue);
         Ok(state)
     }
@@ -948,16 +947,16 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, Arc<RwLock<FrameInfo>>> for HaruhiSh
         _conn: &Connection,
         _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
-        let frame_info = data.write().unwrap();
+        let mut frame_info = data.write().unwrap();
         match event {
             ext_image_copy_capture_session_v1::Event::BufferSize { width, height } => {
-                if frame_info.buffer_size.get().is_none() {
-                    frame_info.buffer_size.set(Size { width, height }).unwrap();
+                if frame_info.buffer_size.is_none() {
+                    frame_info.buffer_size = Some(Size { width, height });
                 }
             }
             ext_image_copy_capture_session_v1::Event::ShmFormat { format } => {
-                if frame_info.shm_format.get().is_none() {
-                    frame_info.shm_format.set(format).unwrap();
+                if frame_info.shm_format.is_none() {
+                    frame_info.shm_format = Some(format);
                 }
             }
             ext_image_copy_capture_session_v1::Event::Done => {}
@@ -1032,10 +1031,3 @@ impl Dispatch<WlOutput, ()> for HaruhiShotState {
 
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
-delegate_noop!(LayerShellState: ignore WlCompositor);
-delegate_noop!(LayerShellState: ignore WlShm);
-delegate_noop!(LayerShellState: ignore WlShmPool);
-delegate_noop!(LayerShellState: ignore WlBuffer);
-delegate_noop!(LayerShellState: ignore WlSurface);
-delegate_noop!(LayerShellState: ignore WpViewport);
-delegate_noop!(LayerShellState: ignore WpViewporter);
