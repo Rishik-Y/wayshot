@@ -1,8 +1,8 @@
+use crate::ext_image_protocols::WlOutputInfo;
+use crate::region::{LogicalRegion, Position, Size};
 use std::fmt::Display;
 use std::sync::OnceLock;
 use wayland_client::protocol::{wl_output, wl_output::WlOutput};
-use crate::ext_image_protocols::WlOutputInfo;
-use crate::region::{LogicalRegion, Position, Size};
 
 /// Represents an accessible wayland output.
 ///
@@ -13,7 +13,7 @@ pub struct OutputInfo {
     pub name: String,
     pub description: String,
     pub transform: wl_output::Transform,
-	
+
     pub physical_size: Size,
     pub logical_region: LogicalRegion,
 }
@@ -42,17 +42,17 @@ impl OutputInfo {
 //
 //	pub(crate) fn new(output: WlOutput) -> Self {
 //		Self {
-//			wl_output: output,
-//			
+//			output: output,
+//
 //			position: Position::default(),
 //			size: Size::default(),
 //			logical_size: Size::default(),
-//			
+//
 //			name: "".to_owned(),
 //			description: "".to_owned(),
-//			
+//
 //			xdg_output: OnceLock::new(),
-//			
+//
 //			transform: wl_output::Transform::Normal,
 //			scale: 1,
 //		}
