@@ -46,3 +46,22 @@ pub enum Error {
     #[error("No EGLImageTargetTexture2DOES function located, this extension may not be supported")]
     EGLImageToTexProcNotFoundError,
 }
+
+/// This describe the error happens during screenshot
+#[derive(Error, Debug)]
+pub enum HaruhiError {
+	#[error("Init Failed connection")]
+	InitFailedConnection(#[from] ConnectError),
+	#[error("Init Failed Global")]
+	InitFailedGlobal(#[from] GlobalError),
+	#[error("Dispatch Error")]
+	DispatchError(#[from] DispatchError),
+	#[error("Error during queue")]
+	BindError(#[from] BindError),
+	#[error("Error in write image in shm")]
+	ShmError(#[from] io::Error),
+	#[error("Not Support format")]
+	NotSupportFormat,
+	#[error("Capture Failed")]
+	CaptureFailed(String),
+}

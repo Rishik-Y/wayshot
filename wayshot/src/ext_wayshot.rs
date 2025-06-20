@@ -32,7 +32,7 @@ pub enum WayshotImageWriteError {
     #[error("Output not exist")]
     OutputNotExist,
     #[error("Wayland shot error")]
-    WaylandError(#[from] libwayshot::ext_image_protocols::HaruhiError),
+    WaylandError(#[from] libwayshot::error::HaruhiError),
 }
 
 pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>) {
@@ -204,8 +204,8 @@ pub fn ext_capture_area(
             }),
             libwaysip::SelectionType::Area,
         )
-        .map_err(|e| libwayshot::ext_image_protocols::HaruhiError::CaptureFailed(e.to_string()))?
-        .ok_or(libwayshot::ext_image_protocols::HaruhiError::CaptureFailed(
+        .map_err(|e| libwayshot::error::HaruhiError::CaptureFailed(e.to_string()))?
+        .ok_or(libwayshot::error::HaruhiError::CaptureFailed(
             "Failed to capture the area".to_string(),
         ))?;
         waysip_to_region(info.size(), info.left_top_point())
@@ -235,7 +235,7 @@ pub fn ext_capture_area(
 pub fn waysip_to_region(
     size: libwaysip::Size,
     point: libwaysip::Position,
-) -> Result<Region, libwayshot::ext_image_protocols::HaruhiError> {
+) -> Result<Region, libwayshot::error::HaruhiError> {
     let size: Size = Size {
         width: size.width as u32,
         height: size.height as u32,
@@ -272,8 +272,8 @@ pub fn ext_capture_color(
             }),
             libwaysip::SelectionType::Point,
         )
-        .map_err(|e| libwayshot::ext_image_protocols::HaruhiError::CaptureFailed(e.to_string()))?
-        .ok_or(libwayshot::ext_image_protocols::HaruhiError::CaptureFailed(
+        .map_err(|e| libwayshot::error::HaruhiError::CaptureFailed(e.to_string()))?
+        .ok_or(libwayshot::error::HaruhiError::CaptureFailed(
             "Failed to capture the area".to_string(),
         ))?;
         waysip_to_region(info.size(), info.left_top_point())

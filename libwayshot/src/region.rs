@@ -78,6 +78,20 @@ pub struct Position {
     pub y: i32,
 }
 
+use std::ops::Sub;
+
+impl Sub for Position {
+	type Output = Self;
+
+	fn sub(self, rhs: Self) -> Self::Output {
+		Self {
+			x: self.x - rhs.x,
+			y: self.y - rhs.y,
+		}
+	}
+}
+
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Size {
     /// Width.
@@ -238,18 +252,5 @@ impl TryFrom<&[OutputInfo]> for LogicalRegion {
                 },
             },
         })
-    }
-}
-
-use std::ops::Sub;
-
-impl Sub for Position {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self {
-            x: self.x - rhs.x,
-            y: self.y - rhs.y,
-        }
     }
 }

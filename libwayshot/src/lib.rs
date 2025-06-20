@@ -5,7 +5,7 @@
 
 mod convert;
 mod dispatch;
-mod error;
+pub mod error;
 mod image_util;
 pub mod output;
 pub mod region;

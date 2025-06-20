@@ -39,8 +39,6 @@ use wayland_protocols::xdg::xdg_output::zv1::client::{
 
 use std::sync::{Arc, RwLock};
 
-use std::ops::Sub;
-
 use wayland_protocols::{
     ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options,
     wp::viewporter::client::wp_viewporter::WpViewporter,
@@ -67,6 +65,7 @@ use wayland_client::{
 
 use crate::region::{LogicalRegion, Position, Region, Size};
 use crate::output::OutputInfo;
+use crate::error::HaruhiError;
 
 /// This main state of HaruhiShot, We use it to do screen copy
 #[derive(Debug)]
@@ -131,25 +130,6 @@ struct CaptureOutputData {
     transform: wl_output::Transform,
     frame_format: Format,
     screen_position: Position,
-}
-
-/// This describe the error happens during screenshot
-#[derive(Error, Debug)]
-pub enum HaruhiError {
-    #[error("Init Failed connection")]
-    InitFailedConnection(#[from] ConnectError),
-    #[error("Init Failed Global")]
-    InitFailedGlobal(#[from] GlobalError),
-    #[error("Dispatch Error")]
-    DispatchError(#[from] DispatchError),
-    #[error("Error during queue")]
-    BindError(#[from] BindError),
-    #[error("Error in write image in shm")]
-    ShmError(#[from] io::Error),
-    #[error("Not Support format")]
-    NotSupportFormat,
-    #[error("Capture Failed")]
-    CaptureFailed(String),
 }
 
 #[derive(Debug, Clone)]
@@ -1030,4 +1010,3 @@ impl Dispatch<WlOutput, ()> for HaruhiShotState {
 }
 
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
-
