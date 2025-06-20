@@ -39,6 +39,13 @@ use wayland_protocols::xdg::xdg_output::zv1::client::{
 
 use std::sync::{Arc, RwLock};
 
+// Replace the layer shell imports with xdg_shell imports
+use wayland_protocols::xdg::shell::client::{
+	xdg_surface::{self, XdgSurface},
+	xdg_toplevel::{self, XdgToplevel},
+	xdg_wm_base::{self, XdgWmBase},
+};
+
 use wayland_protocols::{
     ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options,
     wp::viewporter::client::wp_viewporter::WpViewporter,
@@ -66,6 +73,7 @@ use wayland_client::{
 use crate::region::{LogicalRegion, Position, Region, Size};
 use crate::output::OutputInfo;
 use crate::error::HaruhiError;
+use crate::dispatch::XdgShellState;
 
 /// This main state of HaruhiShot, We use it to do screen copy
 #[derive(Debug)]
@@ -294,76 +302,6 @@ impl AreaShotInfo {
                 height: (size.height as f64 * height as f64 / real_height as f64) as u32,
             },
         })
-    }
-}
-
-// Replace the layer shell imports with xdg_shell imports
-use wayland_protocols::xdg::shell::client::{
-    xdg_surface::{self, XdgSurface},
-    xdg_toplevel::{self, XdgToplevel},
-    xdg_wm_base::{self, XdgWmBase},
-};
-
-#[derive(Debug)]
-pub(crate) struct XdgShellState {
-    pub configured_surfaces: HashSet<XdgSurface>,
-}
-
-impl XdgShellState {
-    pub(crate) fn new() -> Self {
-        Self {
-            configured_surfaces: HashSet::new(),
-        }
-    }
-}
-
-// Replace the LayerShellState dispatch implementations with XdgShell ones
-delegate_noop!(XdgShellState: ignore WlCompositor);
-delegate_noop!(XdgShellState: ignore WlShm);
-delegate_noop!(XdgShellState: ignore WlShmPool);
-delegate_noop!(XdgShellState: ignore WlBuffer);
-delegate_noop!(XdgShellState: ignore WlSurface);
-delegate_noop!(XdgShellState: ignore WpViewport);
-delegate_noop!(XdgShellState: ignore WpViewporter);
-delegate_noop!(XdgShellState: ignore XdgToplevel);
-
-impl Dispatch<XdgSurface, WlOutput> for XdgShellState {
-    fn event(
-        state: &mut Self,
-        proxy: &XdgSurface,
-        event: <XdgSurface as Proxy>::Event,
-        _data: &WlOutput,
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        match event {
-            xdg_surface::Event::Configure { serial } => {
-                tracing::debug!("Acking XDG surface configure");
-                state.configured_surfaces.insert(proxy.clone());
-                proxy.ack_configure(serial);
-                tracing::trace!("Acked XDG surface configure");
-            }
-            _ => {}
-        }
-    }
-}
-
-// Add XdgWmBase ping handling
-impl Dispatch<XdgWmBase, ()> for XdgShellState {
-    fn event(
-        _state: &mut Self,
-        proxy: &XdgWmBase,
-        event: <XdgWmBase as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        match event {
-            xdg_wm_base::Event::Ping { serial } => {
-                proxy.pong(serial);
-            }
-            _ => {}
-        }
     }
 }
 

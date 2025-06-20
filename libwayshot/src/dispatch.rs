@@ -3,21 +3,15 @@ use std::{
     os::fd::{AsFd, BorrowedFd},
     sync::atomic::{AtomicBool, Ordering},
 };
-use wayland_client::{
-    Connection, Dispatch, QueueHandle,
-    WEnum::{self, Value},
-    delegate_noop,
-    globals::GlobalListContents,
-    protocol::{
-        wl_buffer::WlBuffer,
-        wl_compositor::WlCompositor,
-        wl_output::{self, WlOutput},
-        wl_registry::{self, WlRegistry},
-        wl_shm::WlShm,
-        wl_shm_pool::WlShmPool,
-        wl_surface::WlSurface,
-    },
-};
+use wayland_client::{Connection, Dispatch, QueueHandle, WEnum::{self, Value}, delegate_noop, globals::GlobalListContents, protocol::{
+	wl_buffer::WlBuffer,
+	wl_compositor::WlCompositor,
+	wl_output::{self, WlOutput},
+	wl_registry::{self, WlRegistry},
+	wl_shm::WlShm,
+	wl_shm_pool::WlShmPool,
+	wl_surface::WlSurface,
+}, Proxy};
 use wayland_protocols::{
     wp::{
         linux_dmabuf::zv1::client::{
@@ -302,47 +296,6 @@ impl wayland_client::Dispatch<wl_registry::WlRegistry, GlobalListContents> for W
     }
 }
 
-pub struct LayerShellState {
-    pub configured_outputs: HashSet<WlOutput>,
-}
-
-delegate_noop!(LayerShellState: ignore WlCompositor);
-delegate_noop!(LayerShellState: ignore WlShm);
-delegate_noop!(LayerShellState: ignore WlShmPool);
-delegate_noop!(LayerShellState: ignore WlBuffer);
-delegate_noop!(LayerShellState: ignore ZwlrLayerShellV1);
-delegate_noop!(LayerShellState: ignore WlSurface);
-delegate_noop!(LayerShellState: ignore WpViewport);
-delegate_noop!(LayerShellState: ignore WpViewporter);
-
-impl wayland_client::Dispatch<ZwlrLayerSurfaceV1, WlOutput> for LayerShellState {
-    // No need to instrument here, span from lib.rs is automatically used.
-    fn event(
-        state: &mut Self,
-        proxy: &ZwlrLayerSurfaceV1,
-        event: <ZwlrLayerSurfaceV1 as wayland_client::Proxy>::Event,
-        data: &WlOutput,
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        match event {
-            zwlr_layer_surface_v1::Event::Configure {
-                serial,
-                width: _,
-                height: _,
-            } => {
-                tracing::debug!("Acking configure");
-                state.configured_outputs.insert(data.clone());
-                proxy.ack_configure(serial);
-                tracing::trace!("Acked configure");
-            }
-            zwlr_layer_surface_v1::Event::Closed => {
-                tracing::debug!("Closed")
-            }
-            _ => {}
-        }
-    }
-}
 pub(crate) struct Card(std::fs::File);
 
 /// Implementing [`AsFd`] is a prerequisite to implementing the traits found
@@ -367,4 +320,74 @@ impl Card {
 pub(crate) struct DMABUFState {
     pub linux_dmabuf: ZwpLinuxDmabufV1,
     pub gbmdev: gbm::Device<Card>,
+}
+
+// Replace the layer shell imports with xdg_shell imports
+use wayland_protocols::xdg::shell::client::{
+	xdg_surface::{self, XdgSurface},
+	xdg_toplevel::{self, XdgToplevel},
+	xdg_wm_base::{self, XdgWmBase},
+};
+
+#[derive(Debug)]
+pub(crate) struct XdgShellState {
+	pub configured_surfaces: HashSet<XdgSurface>,
+}
+
+impl XdgShellState {
+	pub(crate) fn new() -> Self {
+		Self {
+			configured_surfaces: HashSet::new(),
+		}
+	}
+}
+
+// Replace the LayerShellState dispatch implementations with XdgShell ones
+delegate_noop!(XdgShellState: ignore WlCompositor);
+delegate_noop!(XdgShellState: ignore WlShm);
+delegate_noop!(XdgShellState: ignore WlShmPool);
+delegate_noop!(XdgShellState: ignore WlBuffer);
+delegate_noop!(XdgShellState: ignore WlSurface);
+delegate_noop!(XdgShellState: ignore WpViewport);
+delegate_noop!(XdgShellState: ignore WpViewporter);
+delegate_noop!(XdgShellState: ignore XdgToplevel);
+
+impl Dispatch<XdgSurface, WlOutput> for XdgShellState {
+	fn event(
+		state: &mut Self,
+		proxy: &XdgSurface,
+		event: <XdgSurface as Proxy>::Event,
+		_data: &WlOutput,
+		_conn: &Connection,
+		_qhandle: &QueueHandle<Self>,
+	) {
+		match event {
+			xdg_surface::Event::Configure { serial } => {
+				tracing::debug!("Acking XDG surface configure");
+				state.configured_surfaces.insert(proxy.clone());
+				proxy.ack_configure(serial);
+				tracing::trace!("Acked XDG surface configure");
+			}
+			_ => {}
+		}
+	}
+}
+
+// Add XdgWmBase ping handling
+impl Dispatch<XdgWmBase, ()> for XdgShellState {
+	fn event(
+		_state: &mut Self,
+		proxy: &XdgWmBase,
+		event: <XdgWmBase as Proxy>::Event,
+		_data: &(),
+		_conn: &Connection,
+		_qhandle: &QueueHandle<Self>,
+	) {
+		match event {
+			xdg_wm_base::Event::Ping { serial } => {
+				proxy.pong(serial);
+			}
+			_ => {}
+		}
+	}
 }
