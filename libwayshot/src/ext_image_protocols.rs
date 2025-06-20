@@ -66,12 +66,13 @@ use wayland_client::{
 };
 
 use crate::region::{LogicalRegion, Position, Region, Size};
+use crate::output::OutputInfo;
 
 /// This main state of HaruhiShot, We use it to do screen copy
 #[derive(Debug, Default)]
 pub struct HaruhiShotState {
     toplevels: Vec<TopLevel>,
-    output_infos: Vec<WlOutputInfo>,
+    output_infos: Vec<OutputInfo>,
     img_copy_manager: OnceLock<ExtImageCopyCaptureManagerV1>,
     output_image_manager: OnceLock<ExtOutputImageCaptureSourceManagerV1>,
     shm: OnceLock<WlShm>,
@@ -235,41 +236,6 @@ impl LayerShellState {
     }
 }
 
-/// contain the output and their messages
-#[derive(Debug, Clone)]
-pub struct WlOutputInfo {
-    pub(crate) output: WlOutput,
-    pub(crate) name: String,
-    pub(crate) description: String,
-    pub(crate) transform: wl_output::Transform,
-    pub(crate) physical_size: Size,
-
-    pub(crate) logical_region: LogicalRegion,
-
-    pub(crate) xdg_output: Option<ZxdgOutputV1>,
-    pub(crate) scale: i32,
-}
-
-impl WlOutputInfo {
-    /// The name of the output or maybe the screen?
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub(crate) fn new(output: WlOutput) -> Self {
-        Self {
-            output,
-            logical_region: LogicalRegion::default(),
-            physical_size: Size::default(),
-            name: "".to_owned(),
-            description: "".to_owned(),
-            xdg_output: None,
-            transform: wl_output::Transform::Normal,
-            scale: 1,
-        }
-    }
-}
-
 /// Describe the capture option
 /// Now this library provide two options
 /// [CaptureOption::PaintCursors] and [CaptureOption::None]
@@ -421,7 +387,7 @@ impl Dispatch<XdgWmBase, ()> for XdgShellState {
 
 impl HaruhiShotState {
     /// get all outputs and their info
-    pub fn outputs(&self) -> &Vec<WlOutputInfo> {
+    pub fn outputs(&self) -> &Vec<OutputInfo> {
         &self.output_infos
     }
 
@@ -512,7 +478,7 @@ impl HaruhiShotState {
     pub fn ext_capture_single_output(
         &mut self,
         option: CaptureOption,
-        output: WlOutputInfo,
+        output: OutputInfo,
     ) -> Result<ImageInfo, HaruhiError> {
         let mem_fd = ext_create_shm_fd().unwrap();
         let mem_file = File::from(mem_fd);
@@ -538,7 +504,7 @@ impl HaruhiShotState {
 
     fn ext_capture_output_inner<T: AsFd>(
         &mut self,
-        WlOutputInfo {
+        OutputInfo {
             output,
             logical_region:
                 LogicalRegion {
@@ -559,7 +525,7 @@ impl HaruhiShotState {
             //                },
             //            position: screen_position,
             ..
-        }: WlOutputInfo,
+        }: OutputInfo,
         option: CaptureOption,
         fd: T,
         file: Option<&File>,
@@ -921,7 +887,7 @@ impl Dispatch<ZxdgOutputV1, ()> for HaruhiShotState {
             state
                 .output_infos
                 .iter_mut()
-                .find(|WlOutputInfo { xdg_output, .. }| {
+                .find(|OutputInfo { xdg_output, .. }| {
                     xdg_output.as_ref().expect("we need to init here") == proxy
                 })
         else {
@@ -1018,7 +984,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for HaruhiShotState {
             if interface == WlOutput::interface().name {
                 state
                     .output_infos
-                    .push(WlOutputInfo::new(proxy.bind(name, version, qh, ())));
+                    .push(OutputInfo::new(proxy.bind(name, version, qh, ())));
             }
         }
     }
@@ -1036,7 +1002,7 @@ impl Dispatch<WlOutput, ()> for HaruhiShotState {
         let Some(data) = state
             .output_infos
             .iter_mut()
-            .find(|WlOutputInfo { output, .. }| output == proxy)
+            .find(|OutputInfo { output, .. }| output == proxy)
         else {
             return;
         };
