@@ -111,17 +111,11 @@ impl Default for HaruhiShotState {
 /// part
 #[derive(Debug, Clone)]
 pub struct ImageViewInfo {
-    pub info: ImageInfo,
-    pub region: Region,
-}
-
-/// The data of the image, for the whole screen
-#[derive(Debug, Clone)]
-pub struct ImageInfo {
     pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,
     pub color_type: ColorType,
+    pub region: Region,
 }
 
 #[allow(unused)]
@@ -396,7 +390,7 @@ impl HaruhiShotState {
         &mut self,
         option: CaptureOption,
         output: OutputInfo,
-    ) -> Result<ImageInfo, HaruhiError> {
+    ) -> Result<ImageViewInfo, HaruhiError> {
         let mem_fd = ext_create_shm_fd().unwrap();
         let mem_file = File::from(mem_fd);
         let CaptureOutputData {
@@ -404,18 +398,22 @@ impl HaruhiShotState {
             height,
             frame_format,
             ..
-        } = self.ext_capture_output_inner(output, option, mem_file.as_fd(), Some(&mem_file))?;
+        } = self.ext_capture_output_inner(output.clone(), option, mem_file.as_fd(), Some(&mem_file))?;
 
         let mut frame_mmap = unsafe { MmapMut::map_mut(&mem_file).unwrap() };
 
         let converter = crate::convert::create_converter(frame_format).unwrap();
         let color_type = converter.convert_inplace(&mut frame_mmap);
 
-        Ok(ImageInfo {
+        // Create a full screen region representing the entire output
+        let region = output.logical_region.inner.clone();
+
+        Ok(ImageViewInfo {
             data: frame_mmap.deref().into(),
             width,
             height,
             color_type,
+            region,
         })
     }
 
@@ -642,12 +640,10 @@ impl HaruhiShotState {
         let color_type = converter.convert_inplace(&mut frame_mmap);
 
         Ok(ImageViewInfo {
-            info: ImageInfo {
-                data: frame_mmap.deref().into(),
-                width: shotdata.data.width,
-                height: shotdata.data.height,
-                color_type,
-            },
+            data: frame_mmap.deref().into(),
+            width: shotdata.data.width,
+            height: shotdata.data.height,
+            color_type,
             region: area,
         })
     }
@@ -946,5 +942,3 @@ impl Dispatch<WlOutput, ()> for HaruhiShotState {
         }
     }
 }
-
-use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;

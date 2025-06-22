@@ -870,7 +870,7 @@ impl WayshotConnection {
                 ));
             }
         };
-        
+
         // Use XDG shell instead of layer shell
         let xdg_wm_base = match self.globals.bind::<wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase, _, _>(&qh, 1..=1, ()) {
             Ok(x) => x,
@@ -884,7 +884,7 @@ impl WayshotConnection {
                 ));
             }
         };
-        
+
         let viewporter = self.globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
         if viewporter.is_none() {
             tracing::info!(

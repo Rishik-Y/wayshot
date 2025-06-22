@@ -8,6 +8,7 @@ use libwayshot::ext_image_protocols::HaruhiShotState;
 const TMP: &str = "/tmp";
 
 use libwayshot::ext_image_protocols::ImageViewInfo;
+use libwayshot::ext_image_protocols::CaptureOption;
 use libwayshot::region::{Position, Region, Size};
 
 #[derive(Debug, Clone)]
@@ -94,8 +95,6 @@ pub fn ext_capture_output(
     write_to_image(image_info, use_stdout)
 }
 
-use libwayshot::ext_image_protocols::{CaptureOption, ImageInfo};
-
 trait ToCaptureOption {
     fn to_capture_option(self) -> CaptureOption;
 }
@@ -111,7 +110,7 @@ impl ToCaptureOption for bool {
 }
 
 fn write_to_image(
-    image_info: ImageInfo,
+    image_info: ImageViewInfo,
     use_stdout: bool,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     if use_stdout {
@@ -125,12 +124,13 @@ use image::codecs::png::PngEncoder;
 use std::io::{BufWriter, Write, stdout};
 
 fn write_to_stdout(
-    ImageInfo {
+    ImageViewInfo {
         data,
         width,
         height,
         color_type,
-    }: ImageInfo,
+        ..
+    }: ImageViewInfo,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let stdout = stdout();
     let mut writer = BufWriter::new(stdout.lock());
@@ -139,12 +139,13 @@ fn write_to_stdout(
 }
 
 fn write_to_file(
-    ImageInfo {
+    ImageViewInfo {
         data,
         width,
         height,
         color_type,
-    }: ImageInfo,
+        ..
+    }: ImageViewInfo,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let file = random_file_path();
     let mut writer =
@@ -184,13 +185,10 @@ pub fn ext_capture_area(
     pointer: bool,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let ImageViewInfo {
-        info:
-            ImageInfo {
-                data,
-                width: img_width,
-                height: img_height,
-                color_type,
-            },
+        data,
+        width: img_width,
+        height: img_height,
+        color_type,
         region:
             Region {
                 position: Position { x, y },
@@ -252,13 +250,10 @@ pub fn ext_capture_color(
     state: &mut HaruhiShotState,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let ImageViewInfo {
-        info:
-            ImageInfo {
-                data,
-                width: img_width,
-                height: img_height,
-                color_type,
-            },
+        data,
+        width: img_width,
+        height: img_height,
+        color_type,
         region:
             Region {
                 position: Position { x, y },
