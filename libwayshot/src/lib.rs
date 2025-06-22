@@ -703,12 +703,15 @@ impl WayshotConnection {
                                 tracing::error!("Frame copy failed");
                                 return Err(Error::FramecopyFailed);
                             }
-                            FrameState::Finished => {
+                            FrameState::Succeeded => {
                                 tracing::trace!("Frame copy finished");
 
                                 return Ok(DMAFrameGuard {
                                     buffer: dmabuf_wlbuf,
                                 });
+                            }
+                            FrameState::Pending => {
+                                // If still pending, continue the event loop to wait for status change
                             }
                         }
                     }
@@ -763,9 +766,12 @@ impl WayshotConnection {
                         tracing::error!("Frame copy failed");
                         return Err(Error::FramecopyFailed);
                     }
-                    FrameState::Finished => {
+                    FrameState::Succeeded => {
                         tracing::trace!("Frame copy finished");
                         return Ok(FrameGuard { buffer, shm_pool });
+                    }
+                    FrameState::Pending => {
+                        // If still pending, continue the event loop to wait for status change
                     }
                 }
             }

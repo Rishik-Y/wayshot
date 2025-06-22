@@ -177,13 +177,15 @@ impl Dispatch<ZxdgOutputV1, usize> for OutputCaptureState {
     }
 }
 
-/// State of the frame after attempting to copy it's data to a wl_buffer.
+/// State of the frame after attempting to copy its data to a buffer.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum FrameState {
     /// Compositor returned a failed event on calling `frame.copy`.
     Failed,
     /// Compositor sent a Ready event on calling `frame.copy`.
-    Finished,
+    Succeeded,
+    /// Capture is still pending (not yet failed or succeeded).
+    Pending,
 }
 
 pub struct CaptureFrameState {
@@ -248,7 +250,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for CaptureFrameState {
             zwlr_screencopy_frame_v1::Event::Ready { .. } => {
                 // If the frame is successfully copied, a “flags” and a “ready” events are sent. Otherwise, a “failed” event is sent.
                 // This is useful when we call .copy on the frame object.
-                frame.state.replace(FrameState::Finished);
+                frame.state.replace(FrameState::Succeeded);
             }
             zwlr_screencopy_frame_v1::Event::Failed => {
                 frame.state.replace(FrameState::Failed);
