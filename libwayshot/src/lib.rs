@@ -10,6 +10,7 @@ mod image_util;
 pub mod output;
 pub mod region;
 mod screencopy;
+pub mod ext_image_protocols;
 
 use std::{
     collections::HashSet,
@@ -83,7 +84,7 @@ use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 pub struct WayshotBase {
     pub conn: Connection,
     pub globals: GlobalList,
-	output_infos: Vec<OutputInfo>,
+    pub output_infos: Vec<OutputInfo>, // Make this pub so it can be used in ext_image_protocols
 }
 
 #[derive(Debug)]
@@ -1153,5 +1154,3 @@ impl WayshotConnection {
         self.screenshot_outputs(self.get_all_outputs(), cursor_overlay)
     }
 }
-
-pub mod ext_image_protocols;

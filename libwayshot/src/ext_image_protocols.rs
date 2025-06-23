@@ -74,14 +74,13 @@ use crate::region::{LogicalRegion, Position, Region, Size};
 use crate::output::OutputInfo;
 use crate::error::HaruhiError;
 use crate::dispatch::{XdgShellState, FrameState};
+use crate::WayshotBase; // Add this import
 
 /// This main state of HaruhiShot, We use it to do screen copy
 #[derive(Debug)]
 pub struct HaruhiShotState {
-	conn: Connection,
-	globals: GlobalList,
-	output_infos: Vec<OutputInfo>,
-	toplevels: Vec<TopLevel>,
+    pub base: WayshotBase, // Replace conn, globals, output_infos with base
+    toplevels: Vec<TopLevel>,
     img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
     output_image_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
     shm: Option<WlShm>,
@@ -89,10 +88,9 @@ pub struct HaruhiShotState {
     event_queue: Option<EventQueue<Self>>,
 }
 
+// Remove Default impl (it is now unreachable, as WayshotBase is not Default)
 impl Default for HaruhiShotState {
     fn default() -> Self {
-        // This is a partial initialization that will be completed in the init method
-        // The Connection and GlobalList will be properly initialized there
         unimplemented!("HaruhiShotState cannot be created with Default; use new() or new_with_connection() instead")
     }
 }
@@ -287,7 +285,7 @@ impl AreaShotInfo {
 impl HaruhiShotState {
     /// get all outputs and their info
     pub fn outputs(&self) -> &Vec<OutputInfo> {
-        &self.output_infos
+        &self.base.output_infos
     }
 
     pub fn new() -> Result<Self, HaruhiError> {
@@ -323,11 +321,11 @@ impl HaruhiShotState {
     }
 
     pub fn connection(&self) -> &Connection {
-        &self.conn
+        &self.base.conn
     }
 
     pub fn globals(&self) -> &GlobalList {
-        &self.globals
+        &self.base.globals
     }
 
     fn init(connection: Option<Connection>) -> Result<Self, HaruhiError> {
@@ -342,9 +340,11 @@ impl HaruhiShotState {
 
         // Create a new state with non-optional conn and globals fields
         let mut state = Self {
-            conn,
-            globals,
-            output_infos: Vec::new(),
+            base: WayshotBase {
+                conn,
+                globals,
+                output_infos: Vec::new(),
+            },
             toplevels: Vec::new(),
             img_copy_manager: None,
             output_image_manager: None,
@@ -357,14 +357,14 @@ impl HaruhiShotState {
 
         let _registry = display.get_registry(&qh, ());
         event_queue.blocking_dispatch(&mut state)?;
-        let image_manager = state.globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
+        let image_manager = state.base.globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
         let output_image_manager =
-            state.globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
-        let shm = state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
-        state.globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
-        let the_xdg_output_manager = state.globals.bind::<ZxdgOutputManagerV1, _, _>(&qh, 3..=3, ())?;
+            state.base.globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
+        let shm = state.base.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
+        state.base.globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
+        let the_xdg_output_manager = state.base.globals.bind::<ZxdgOutputManagerV1, _, _>(&qh, 3..=3, ())?;
 
-        for output in state.output_infos.iter_mut() {
+        for output in state.base.output_infos.iter_mut() {
             let xdg_the_output = the_xdg_output_manager.get_xdg_output(&output.output, &qh, ());
             output.xdg_output = Some(xdg_the_output);
         }
@@ -791,10 +791,11 @@ impl Dispatch<ZxdgOutputV1, ()> for HaruhiShotState {
         event: <ZxdgOutputV1 as Proxy>::Event,
         _data: &(),
         _conn: &Connection,
-        _qhandle: &wayland_client::QueueHandle<Self>,
+        _qhandle: &QueueHandle<Self>,
     ) {
         let Some(data) =
             state
+                .base
                 .output_infos
                 .iter_mut()
                 .find(|OutputInfo { xdg_output, .. }| {
@@ -893,6 +894,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for HaruhiShotState {
         {
             if interface == WlOutput::interface().name {
                 state
+                    .base
                     .output_infos
                     .push(OutputInfo::new(proxy.bind(name, version, qh, ())));
             }
@@ -910,6 +912,7 @@ impl Dispatch<WlOutput, ()> for HaruhiShotState {
         _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
         let Some(data) = state
+            .base
             .output_infos
             .iter_mut()
             .find(|OutputInfo { output, .. }| output == proxy)
