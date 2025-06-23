@@ -13,6 +13,7 @@ use wayland_client::{Connection, Dispatch, QueueHandle, WEnum::{self, Value}, de
 	wl_surface::WlSurface,
 }, Proxy};
 use wayland_protocols::{
+    ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason,
     wp::{
         linux_dmabuf::zv1::client::{
             zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1},
@@ -181,7 +182,7 @@ impl Dispatch<ZxdgOutputV1, usize> for OutputCaptureState {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum FrameState {
     /// Compositor returned a failed event on calling `frame.copy`.
-    Failed,
+    Failed(Option<WEnum<FailureReason>>),
     /// Compositor sent a Ready event on calling `frame.copy`.
     Succeeded,
     /// Capture is still pending (not yet failed or succeeded).
@@ -253,7 +254,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for CaptureFrameState {
                 frame.state.replace(FrameState::Succeeded);
             }
             zwlr_screencopy_frame_v1::Event::Failed => {
-                frame.state.replace(FrameState::Failed);
+                frame.state.replace(FrameState::Failed(None));
             }
             zwlr_screencopy_frame_v1::Event::Damage { .. } => {}
             zwlr_screencopy_frame_v1::Event::LinuxDmabuf {

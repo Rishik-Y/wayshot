@@ -175,7 +175,7 @@ impl FrameInfo {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CaptureState {
-    Failed(WEnum<FailureReason>),
+    Failed(Option<WEnum<FailureReason>>),
     Succeeded,
     Pending,
 }
@@ -508,7 +508,7 @@ impl HaruhiShotState {
                     break;
                 }
                 CaptureState::Failed(info) => match info {
-                    WEnum::Value(reason) => match reason {
+                    Some(WEnum::Value(reason)) => match reason {
                         FailureReason::Stopped => {
                             return Err(HaruhiError::CaptureFailed("Stopped".to_owned()));
                         }
@@ -520,10 +520,13 @@ impl HaruhiShotState {
                             return Err(HaruhiError::CaptureFailed("Unknown".to_owned()));
                         }
                     },
-                    WEnum::Unknown(code) => {
+                    Some(WEnum::Unknown(code)) => {
                         return Err(HaruhiError::CaptureFailed(format!(
                             "Unknown reason, code : {code}"
                         )));
+                    },
+                    None => {
+                        return Err(HaruhiError::CaptureFailed("No failure reason provided".to_owned()));
                     }
                 },
                 CaptureState::Pending => {}
@@ -840,7 +843,7 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, Arc<RwLock<CaptureInfo>>> for HaruhiSh
                 data.state = CaptureState::Succeeded;
             }
             ext_image_copy_capture_frame_v1::Event::Failed { reason } => {
-                data.state = CaptureState::Failed(reason)
+                data.state = CaptureState::Failed(Some(reason))
             }
             ext_image_copy_capture_frame_v1::Event::Transform {
                 transform: WEnum::Value(transform),

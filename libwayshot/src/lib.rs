@@ -699,7 +699,7 @@ impl WayshotConnection {
                     // Basically reads, if frame state is not None then...
                     if let Some(state) = state.state {
                         match state {
-                            FrameState::Failed => {
+                            FrameState::Failed(_) => {
                                 tracing::error!("Frame copy failed");
                                 return Err(Error::FramecopyFailed);
                             }
@@ -762,7 +762,7 @@ impl WayshotConnection {
             // Basically reads, if frame state is not None then...
             if let Some(state) = state.state {
                 match state {
-                    FrameState::Failed => {
+                    FrameState::Failed(_) => {
                         tracing::error!("Frame copy failed");
                         return Err(Error::FramecopyFailed);
                     }
