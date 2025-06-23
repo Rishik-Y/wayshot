@@ -78,8 +78,8 @@ use crate::dispatch::{XdgShellState, FrameState};
 /// This main state of HaruhiShot, We use it to do screen copy
 #[derive(Debug)]
 pub struct HaruhiShotState {
-	conn: Option<Connection>,
-	globals: Option<GlobalList>,
+	conn: Connection,
+	globals: GlobalList,
 	output_infos: Vec<OutputInfo>,
 	toplevels: Vec<TopLevel>,
     img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
@@ -91,17 +91,9 @@ pub struct HaruhiShotState {
 
 impl Default for HaruhiShotState {
     fn default() -> Self {
-        Self {
-            conn: None,
-            globals: None,
-            output_infos: Vec::new(),
-            toplevels: Vec::new(),
-            img_copy_manager: None,
-            output_image_manager: None,
-            shm: None,
-            qh: None,
-            event_queue: None,
-        }
+        // This is a partial initialization that will be completed in the init method
+        // The Connection and GlobalList will be properly initialized there
+        unimplemented!("HaruhiShotState cannot be created with Default; use new() or new_with_connection() instead")
     }
 }
 
@@ -331,11 +323,11 @@ impl HaruhiShotState {
     }
 
     pub fn connection(&self) -> &Connection {
-        self.conn.as_ref().expect("should init")
+        &self.conn
     }
 
     pub fn globals(&self) -> &GlobalList {
-        self.globals.as_ref().expect("should init")
+        &self.globals
     }
 
     fn init(connection: Option<Connection>) -> Result<Self, HaruhiError> {
@@ -345,21 +337,32 @@ impl HaruhiShotState {
             Connection::connect_to_env()?
         };
 
-        let (globals, mut event_queue) = registry_queue_init::<HaruhiShotState>(&conn)?; // We just need the
+        let (globals, mut event_queue) = registry_queue_init::<HaruhiShotState>(&conn)?;
         let display = conn.display();
 
-        let mut state = HaruhiShotState::default();
+        // Create a new state with non-optional conn and globals fields
+        let mut state = Self {
+            conn,
+            globals,
+            output_infos: Vec::new(),
+            toplevels: Vec::new(),
+            img_copy_manager: None,
+            output_image_manager: None,
+            shm: None,
+            qh: None,
+            event_queue: None,
+        };
 
         let qh = event_queue.handle();
 
         let _registry = display.get_registry(&qh, ());
         event_queue.blocking_dispatch(&mut state)?;
-        let image_manager = globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
+        let image_manager = state.globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
         let output_image_manager =
-            globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
-        let shm = globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
-        globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
-        let the_xdg_output_manager = globals.bind::<ZxdgOutputManagerV1, _, _>(&qh, 3..=3, ())?;
+            state.globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
+        let shm = state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
+        state.globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
+        let the_xdg_output_manager = state.globals.bind::<ZxdgOutputManagerV1, _, _>(&qh, 3..=3, ())?;
 
         for output in state.output_infos.iter_mut() {
             let xdg_the_output = the_xdg_output_manager.get_xdg_output(&output.output, &qh, ());
@@ -372,8 +375,6 @@ impl HaruhiShotState {
         state.output_image_manager = Some(output_image_manager);
         state.qh = Some(qh);
         state.shm = Some(shm);
-        state.globals = Some(globals);
-        state.conn = Some(conn);
         state.event_queue = Some(event_queue);
         Ok(state)
     }
