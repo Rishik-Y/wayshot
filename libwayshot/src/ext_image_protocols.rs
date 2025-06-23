@@ -73,7 +73,7 @@ use wayland_client::{
 use crate::region::{LogicalRegion, Position, Region, Size};
 use crate::output::OutputInfo;
 use crate::error::HaruhiError;
-use crate::dispatch::XdgShellState;
+use crate::dispatch::{XdgShellState, FrameState};
 
 /// This main state of HaruhiShot, We use it to do screen copy
 #[derive(Debug)]
@@ -173,30 +173,23 @@ impl FrameInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum CaptureState {
-    Failed(Option<WEnum<FailureReason>>),
-    Succeeded,
-    Pending,
-}
-
 pub(crate) struct CaptureInfo {
     transform: wl_output::Transform,
-    state: CaptureState,
+    state: FrameState,
 }
 
 impl CaptureInfo {
     pub(crate) fn new() -> Arc<RwLock<Self>> {
         Arc::new(RwLock::new(Self {
             transform: wl_output::Transform::Normal,
-            state: CaptureState::Pending,
+            state: FrameState::Pending,
         }))
     }
 
     pub(crate) fn transform(&self) -> wl_output::Transform {
         self.transform
     }
-    pub(crate) fn state(&self) -> CaptureState {
+    pub(crate) fn state(&self) -> FrameState {
         self.state
     }
 }
@@ -503,11 +496,11 @@ impl HaruhiShotState {
             event_queue.blocking_dispatch(self)?;
             let info = capture_info.read().unwrap();
             match info.state() {
-                CaptureState::Succeeded => {
+                FrameState::Succeeded => {
                     transform = info.transform();
                     break;
                 }
-                CaptureState::Failed(info) => match info {
+                FrameState::Failed(info) => match info {
                     Some(WEnum::Value(reason)) => match reason {
                         FailureReason::Stopped => {
                             return Err(HaruhiError::CaptureFailed("Stopped".to_owned()));
@@ -529,7 +522,7 @@ impl HaruhiShotState {
                         return Err(HaruhiError::CaptureFailed("No failure reason provided".to_owned()));
                     }
                 },
-                CaptureState::Pending => {}
+                FrameState::Pending => {}
             }
         }
 
@@ -840,10 +833,10 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, Arc<RwLock<CaptureInfo>>> for HaruhiSh
         let mut data = data.write().unwrap();
         match event {
             ext_image_copy_capture_frame_v1::Event::Ready => {
-                data.state = CaptureState::Succeeded;
+                data.state = FrameState::Succeeded;
             }
             ext_image_copy_capture_frame_v1::Event::Failed { reason } => {
-                data.state = CaptureState::Failed(Some(reason))
+                data.state = FrameState::Failed(Some(reason))
             }
             ext_image_copy_capture_frame_v1::Event::Transform {
                 transform: WEnum::Value(transform),
