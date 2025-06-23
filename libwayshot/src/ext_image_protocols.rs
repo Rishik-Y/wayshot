@@ -88,13 +88,6 @@ pub struct HaruhiShotState {
     event_queue: Option<EventQueue<Self>>,
 }
 
-// Remove Default impl (it is now unreachable, as WayshotBase is not Default)
-impl Default for HaruhiShotState {
-    fn default() -> Self {
-        unimplemented!("HaruhiShotState cannot be created with Default; use new() or new_with_connection() instead")
-    }
-}
-
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
 /// and when you do area screenshot, This lib will also provide you with the view of the selected
