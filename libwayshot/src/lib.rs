@@ -70,6 +70,7 @@ pub mod reexport {
     pub use wl_output::{Transform, WlOutput};
 }
 use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
+use crate::ext_image_protocols::HaruhiShotBase;
 
 /// Struct to store wayland connection and globals list.
 /// # Example usage
@@ -91,6 +92,7 @@ pub struct WayshotBase {
 pub struct WayshotConnection {
     pub base: WayshotBase,
     dmabuf_state: Option<DMABUFState>,
+    pub ext_image: Option<HaruhiShotBase<Self>>,
 }
 
 impl WayshotConnection {
@@ -112,6 +114,7 @@ impl WayshotConnection {
         let mut initial_state = Self {
             base,
             dmabuf_state: None,
+            ext_image: None,
         };
 
         initial_state.refresh_outputs()?;
@@ -141,6 +144,7 @@ impl WayshotConnection {
                 linux_dmabuf,
                 gbmdev: gbm,
             }),
+            ext_image: None,
         };
 
         initial_state.refresh_outputs()?;
@@ -675,6 +679,7 @@ impl WayshotConnection {
     ) -> Result<DMAFrameGuard> {
         match &self.dmabuf_state {
             Some(dmabuf_state) => {
+                println!("The program screenshoted via dmabuf");
                 // Connecting to wayland environment.
                 let qh = event_queue.handle();
 
@@ -744,6 +749,7 @@ impl WayshotConnection {
         fd: T,
     ) -> Result<FrameGuard> {
         // Connecting to wayland environment.
+        println!("The program screenshoted via wlshm");
         let qh = event_queue.handle();
 
         // Instantiate shm global.

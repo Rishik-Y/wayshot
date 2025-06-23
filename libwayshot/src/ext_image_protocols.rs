@@ -76,18 +76,6 @@ use crate::error::HaruhiError;
 use crate::dispatch::{XdgShellState, FrameState};
 use crate::WayshotBase; // Add this import
 
-/// This main state of HaruhiShot, We use it to do screen copy
-#[derive(Debug)]
-pub struct HaruhiShotState {
-    pub base: WayshotBase, // Replace conn, globals, output_infos with base
-    toplevels: Vec<TopLevel>,
-    img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
-    output_image_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
-    shm: Option<WlShm>,
-    qh: Option<QueueHandle<Self>>,
-    event_queue: Option<EventQueue<Self>>,
-}
-
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
 /// and when you do area screenshot, This lib will also provide you with the view of the selected
@@ -274,6 +262,22 @@ impl AreaShotInfo {
         })
     }
 }
+#[derive(Debug)]
+pub struct HaruhiShotBase<T> {
+    pub toplevels: Vec<TopLevel>,
+    pub img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
+    pub output_image_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
+    pub shm: Option<WlShm>,
+    pub qh: Option<QueueHandle<T>>,
+    pub event_queue: Option<EventQueue<T>>,
+}
+
+/// This main state of HaruhiShot, We use it to do screen copy
+#[derive(Debug)]
+pub struct HaruhiShotState {
+    pub base: WayshotBase, // Connection, globals and output info
+    pub ext_image: HaruhiShotBase<Self>,
+}
 
 impl HaruhiShotState {
     /// get all outputs and their info
@@ -286,19 +290,19 @@ impl HaruhiShotState {
     }
 
     pub(crate) fn take_event_queue(&mut self) -> EventQueue<Self> {
-        self.event_queue.take().expect("control your self")
+        self.ext_image.event_queue.take().expect("control your self")
     }
 
     pub(crate) fn output_image_manager(&self) -> &ExtOutputImageCaptureSourceManagerV1 {
-        self.output_image_manager.as_ref().expect("Should init")
+        self.ext_image.output_image_manager.as_ref().expect("Should init")
     }
 
     pub(crate) fn image_copy_capture_manager(&self) -> &ExtImageCopyCaptureManagerV1 {
-        self.img_copy_manager.as_ref().expect("Should init")
+        self.ext_image.img_copy_manager.as_ref().expect("Should init")
     }
 
     pub(crate) fn qhandle(&self) -> &QueueHandle<Self> {
-        self.qh.as_ref().expect("Should init")
+        self.ext_image.qh.as_ref().expect("Should init")
     }
 
     pub fn new_with_connection(connection: Connection) -> Result<Self, HaruhiError> {
@@ -306,11 +310,11 @@ impl HaruhiShotState {
     }
 
     pub(crate) fn shm(&self) -> &WlShm {
-        self.shm.as_ref().expect("Should init")
+        self.ext_image.shm.as_ref().expect("Should init")
     }
 
     pub(crate) fn reset_event_queue(&mut self, event_queue: EventQueue<Self>) {
-        self.event_queue = Some(event_queue);
+        self.ext_image.event_queue = Some(event_queue);
     }
 
     pub fn connection(&self) -> &Connection {
@@ -331,19 +335,21 @@ impl HaruhiShotState {
         let (globals, mut event_queue) = registry_queue_init::<HaruhiShotState>(&conn)?;
         let display = conn.display();
 
-        // Create a new state with non-optional conn and globals fields
+        // Create a new state with the base fields
         let mut state = Self {
             base: WayshotBase {
                 conn,
                 globals,
                 output_infos: Vec::new(),
             },
-            toplevels: Vec::new(),
-            img_copy_manager: None,
-            output_image_manager: None,
-            shm: None,
-            qh: None,
-            event_queue: None,
+            ext_image: HaruhiShotBase {
+                toplevels: Vec::new(),
+                img_copy_manager: None,
+                output_image_manager: None,
+                shm: None,
+                qh: None,
+                event_queue: None,
+            },
         };
 
         let qh = event_queue.handle();
@@ -364,11 +370,11 @@ impl HaruhiShotState {
 
         event_queue.blocking_dispatch(&mut state)?;
 
-        state.img_copy_manager = Some(image_manager);
-        state.output_image_manager = Some(output_image_manager);
-        state.qh = Some(qh);
-        state.shm = Some(shm);
-        state.event_queue = Some(event_queue);
+        state.ext_image.img_copy_manager = Some(image_manager);
+        state.ext_image.output_image_manager = Some(output_image_manager);
+        state.ext_image.qh = Some(qh);
+        state.ext_image.shm = Some(shm);
+        state.ext_image.event_queue = Some(event_queue);
         Ok(state)
     }
 
@@ -746,7 +752,7 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for HaruhiShotState {
         _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
         if let ext_foreign_toplevel_list_v1::Event::Toplevel { toplevel } = event {
-            state.toplevels.push(TopLevel::new(toplevel));
+            state.ext_image.toplevels.push(TopLevel::new(toplevel));
         }
     }
     event_created_child!(HaruhiShotState, ExtForeignToplevelHandleV1, [
@@ -767,7 +773,7 @@ impl Dispatch<ExtForeignToplevelHandleV1, ()> for HaruhiShotState {
             return;
         };
         let Some(current_info) = state
-            .toplevels
+            .ext_image.toplevels
             .iter_mut()
             .find(|my_toplevel| my_toplevel.handle == *toplevel)
         else {
@@ -912,6 +918,7 @@ impl Dispatch<WlOutput, ()> for HaruhiShotState {
         else {
             return;
         };
+
         match event {
             wl_output::Event::Name { name } => {
                 data.name = name;
