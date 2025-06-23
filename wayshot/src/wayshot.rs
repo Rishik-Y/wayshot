@@ -172,8 +172,8 @@ fn main() -> Result<()> {
             |w_conn| {
                 let info = libwaysip::get_area(
                     Some(libwaysip::WaysipConnection {
-                        connection: &w_conn.conn,
-                        globals: &w_conn.globals,
+                        connection: &w_conn.base.conn,
+                        globals: &w_conn.base.globals,
                     }),
                     libwaysip::SelectionType::Area,
                 )

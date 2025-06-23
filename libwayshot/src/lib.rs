@@ -78,11 +78,17 @@ use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 /// let wayshot_connection = WayshotConnection::new()?;
 /// let image_buffer = wayshot_connection.screenshot_all()?;
 /// ```
+
 #[derive(Debug)]
-pub struct WayshotConnection {
+pub struct WayshotBase {
     pub conn: Connection,
     pub globals: GlobalList,
-    output_infos: Vec<OutputInfo>,
+	output_infos: Vec<OutputInfo>,
+}
+
+#[derive(Debug)]
+pub struct WayshotConnection {
+    pub base: WayshotBase,
     dmabuf_state: Option<DMABUFState>,
 }
 
@@ -97,10 +103,13 @@ impl WayshotConnection {
     pub fn from_connection(conn: Connection) -> Result<Self> {
         let (globals, _) = registry_queue_init::<WayshotState>(&conn)?;
 
-        let mut initial_state = Self {
+        let base = WayshotBase {
             conn,
             globals,
             output_infos: Vec::new(),
+        };
+        let mut initial_state = Self {
+            base,
             dmabuf_state: None,
         };
 
@@ -122,9 +131,11 @@ impl WayshotConnection {
         // init a GBM device
         let gbm = GBMDevice::new(gpu).unwrap();
         let mut initial_state = Self {
-            conn,
-            globals,
-            output_infos: Vec::new(),
+            base: WayshotBase {
+                conn,
+                globals,
+                output_infos: Vec::new(),
+            },
             dmabuf_state: Some(DMABUFState {
                 linux_dmabuf,
                 gbmdev: gbm,
@@ -138,7 +149,7 @@ impl WayshotConnection {
 
     /// Fetch all accessible wayland outputs.
     pub fn get_all_outputs(&self) -> &[OutputInfo] {
-        self.output_infos.as_slice()
+        self.base.output_infos.as_slice()
     }
 
     /// print the displays' info
@@ -178,11 +189,11 @@ impl WayshotConnection {
         let mut state = OutputCaptureState {
             outputs: Vec::new(),
         };
-        let mut event_queue = self.conn.new_event_queue::<OutputCaptureState>();
+        let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
         let qh = event_queue.handle();
 
         // Bind to xdg_output global.
-        let zxdg_output_manager = match self.globals.bind::<ZxdgOutputManagerV1, _, _>(
+        let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
             &qh,
             3..=3,
             (),
@@ -197,7 +208,7 @@ impl WayshotConnection {
         };
 
         // Fetch all outputs; when their names arrive, add them to the list
-        let _ = self.conn.display().get_registry(&qh, ());
+        let _ = self.base.conn.display().get_registry(&qh, ());
         event_queue.roundtrip(&mut state)?;
 
         // We loop over each output and request its position data.
@@ -224,7 +235,7 @@ impl WayshotConnection {
             return Err(Error::NoOutputs);
         }
         tracing::trace!("Outputs detected: {:#?}", state.outputs);
-        self.output_infos = state.outputs;
+        self.base.output_infos = state.outputs;
 
         Ok(())
     }
@@ -338,7 +349,7 @@ impl WayshotConnection {
         capture_region: Option<EmbeddedRegion>,
     ) -> Result<EGLImageGuard<'a, T>> {
         let egl_display = unsafe {
-            match egl_instance.get_display(self.conn.display().id().as_ptr() as *mut c_void) {
+            match egl_instance.get_display(self.base.conn.display().id().as_ptr() as *mut c_void) {
                 Some(disp) => disp,
                 None => return Err(egl_instance.get_error().unwrap().into()),
             }
@@ -506,11 +517,11 @@ impl WayshotConnection {
             state: None,
             buffer_done: AtomicBool::new(false),
         };
-        let mut event_queue = self.conn.new_event_queue::<CaptureFrameState>();
+        let mut event_queue = self.base.conn.new_event_queue::<CaptureFrameState>();
         let qh = event_queue.handle();
 
         // Instantiating screencopy manager.
-        let screencopy_manager = match self.globals.bind::<ZwlrScreencopyManagerV1, _, _>(
+        let screencopy_manager = match self.base.globals.bind::<ZwlrScreencopyManagerV1, _, _>(
             &qh,
             3..=3,
             (),
@@ -596,11 +607,11 @@ impl WayshotConnection {
             state: None,
             buffer_done: AtomicBool::new(false),
         };
-        let mut event_queue = self.conn.new_event_queue::<CaptureFrameState>();
+        let mut event_queue = self.base.conn.new_event_queue::<CaptureFrameState>();
         let qh = event_queue.handle();
 
         // Instantiating screencopy manager.
-        let screencopy_manager = match self.globals.bind::<ZwlrScreencopyManagerV1, _, _>(
+        let screencopy_manager = match self.base.globals.bind::<ZwlrScreencopyManagerV1, _, _>(
             &qh,
             3..=3,
             (),
@@ -735,7 +746,7 @@ impl WayshotConnection {
         let qh = event_queue.handle();
 
         // Instantiate shm global.
-        let shm = self.globals.bind::<WlShm, _, _>(&qh, 1..=1, ())?;
+        let shm = self.base.globals.bind::<WlShm, _, _>(&qh, 1..=1, ())?;
         let shm_pool = shm.create_pool(
             fd.as_fd(),
             frame_format
@@ -861,10 +872,10 @@ impl WayshotConnection {
     {
         let mut state = XdgShellState::new();
         let mut event_queue: EventQueue<XdgShellState> =
-            self.conn.new_event_queue::<XdgShellState>();
+            self.base.conn.new_event_queue::<XdgShellState>();
         let qh = event_queue.handle();
 
-        let compositor = match self.globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ()) {
+        let compositor = match self.base.globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ()) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!(
@@ -878,7 +889,7 @@ impl WayshotConnection {
         };
 
         // Use XDG shell instead of layer shell
-        let xdg_wm_base = match self.globals.bind::<wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase, _, _>(&qh, 1..=1, ()) {
+        let xdg_wm_base = match self.base.globals.bind::<wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase, _, _>(&qh, 1..=1, ()) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!(
@@ -891,7 +902,7 @@ impl WayshotConnection {
             }
         };
 
-        let viewporter = self.globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
+        let viewporter = self.base.globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
         if viewporter.is_none() {
             tracing::info!(
                 "Compositor does not support wp_viewporter, display scaling may be inaccurate."
