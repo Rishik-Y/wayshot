@@ -174,7 +174,7 @@ fn main() -> Result<()> {
                     .ok_or(libwayshot::WayshotError::FreezeCallbackError(
                         "Failed to capture the area".to_string(),
                     ))?;
-					utils::waysip_to_region(info.size(), info.left_top_point())
+                    utils::waysip_to_region(info.size(), info.left_top_point())
                 },
                 cursor,
             )?

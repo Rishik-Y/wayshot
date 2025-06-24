@@ -402,43 +402,41 @@ impl Dispatch<XdgWmBase, ()> for XdgShellState {
 }
 
 use wayland_protocols::ext::image_copy_capture::v1::client::{
-	ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1},
-	ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
-	ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
+    ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1},
+    ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
+    ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
 };
 
 use tracing::debug;
 
 use wayland_protocols::ext::image_capture_source::v1::client::{
-	ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1,
-	ext_image_capture_source_v1::ExtImageCaptureSourceV1,
-	ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1,
+    ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1,
+    ext_image_capture_source_v1::ExtImageCaptureSourceV1,
+    ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1,
 };
 
 use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
-	ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
-	ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
+    ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
+    ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
 };
 
 use wayland_client::{
     event_created_child,
-	globals::{GlobalList, registry_queue_init}
+    globals::{GlobalList, registry_queue_init},
 };
 
 use std::sync::{Arc, RwLock};
 
-use wayland_protocols::{
-	ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options,
-};
+use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
 
 use image::ColorType;
 use memmap2::MmapMut;
 
-use std::os::fd::{AsRawFd};
+use std::os::fd::AsRawFd;
 
 use std::{
-	fs::File,
-	time::{SystemTime, UNIX_EPOCH},
+    fs::File,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use std::{ops::Deref, os::fd::OwnedFd};
@@ -446,12 +444,12 @@ use std::{ops::Deref, os::fd::OwnedFd};
 use std::io;
 use thiserror::Error;
 use wayland_client::{
-	ConnectError, DispatchError,
-	globals::{BindError, GlobalError},
+    ConnectError, DispatchError,
+    globals::{BindError, GlobalError},
 };
 
-use crate::{WayshotBase, WayshotError, WayshotConnection}; // Add this import
-use crate::ext_image_protocols::{TopLevel, CaptureInfo, FrameInfo};
+use crate::ext_image_protocols::{CaptureInfo, FrameInfo, TopLevel};
+use crate::{WayshotBase, WayshotConnection, WayshotError}; // Add this import
 
 delegate_noop!(WayshotConnection: ignore ExtImageCaptureSourceV1);
 delegate_noop!(WayshotConnection: ignore ExtOutputImageCaptureSourceManagerV1);
@@ -463,116 +461,116 @@ delegate_noop!(WayshotConnection: ignore WlBuffer);
 delegate_noop!(WayshotConnection: ignore WlShmPool);
 
 impl Dispatch<WlRegistry, GlobalListContents> for WayshotConnection {
-	fn event(
-		_state: &mut Self,
-		_proxy: &WlRegistry,
-		_event: <WlRegistry as wayland_client::Proxy>::Event,
-		_data: &GlobalListContents,
-		_conn: &Connection,
-		_qh: &QueueHandle<Self>,
-	) {
-	}
+    fn event(
+        _state: &mut Self,
+        _proxy: &WlRegistry,
+        _event: <WlRegistry as wayland_client::Proxy>::Event,
+        _data: &GlobalListContents,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 impl Dispatch<ExtForeignToplevelListV1, ()> for WayshotConnection {
-	fn event(
-		state: &mut Self,
-		_proxy: &ExtForeignToplevelListV1,
-		event: <ExtForeignToplevelListV1 as Proxy>::Event,
-		_data: &(),
-		_conn: &Connection,
-		_qhandle: &wayland_client::QueueHandle<Self>,
-	) {
-		if let ext_foreign_toplevel_list_v1::Event::Toplevel { toplevel } = event {
-			state
-				.ext_image
-				.as_mut()
-				.expect("ext_image should be initialized")
-				.toplevels
-				.push(TopLevel::new(toplevel));
-		}
-	}
-	event_created_child!(WayshotConnection, ExtForeignToplevelHandleV1, [
+    fn event(
+        state: &mut Self,
+        _proxy: &ExtForeignToplevelListV1,
+        event: <ExtForeignToplevelListV1 as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &wayland_client::QueueHandle<Self>,
+    ) {
+        if let ext_foreign_toplevel_list_v1::Event::Toplevel { toplevel } = event {
+            state
+                .ext_image
+                .as_mut()
+                .expect("ext_image should be initialized")
+                .toplevels
+                .push(TopLevel::new(toplevel));
+        }
+    }
+    event_created_child!(WayshotConnection, ExtForeignToplevelHandleV1, [
         ext_foreign_toplevel_list_v1::EVT_TOPLEVEL_OPCODE => (ExtForeignToplevelHandleV1, ())
     ]);
 }
 
 impl Dispatch<ExtForeignToplevelHandleV1, ()> for WayshotConnection {
-	fn event(
-		state: &mut Self,
-		toplevel: &ExtForeignToplevelHandleV1,
-		event: <ExtForeignToplevelHandleV1 as Proxy>::Event,
-		_data: &(),
-		_conn: &Connection,
-		_qhandle: &wayland_client::QueueHandle<Self>,
-	) {
-		let ext_foreign_toplevel_handle_v1::Event::Title { title } = event else {
-			return;
-		};
-		let Some(current_info) = state
-			.ext_image
-			.as_mut()
-			.expect("ext_image should be initialized")
-			.toplevels
-			.iter_mut()
-			.find(|my_toplevel| my_toplevel.handle == *toplevel)
-		else {
-			return;
-		};
-		current_info.title = title;
-	}
+    fn event(
+        state: &mut Self,
+        toplevel: &ExtForeignToplevelHandleV1,
+        event: <ExtForeignToplevelHandleV1 as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &wayland_client::QueueHandle<Self>,
+    ) {
+        let ext_foreign_toplevel_handle_v1::Event::Title { title } = event else {
+            return;
+        };
+        let Some(current_info) = state
+            .ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .toplevels
+            .iter_mut()
+            .find(|my_toplevel| my_toplevel.handle == *toplevel)
+        else {
+            return;
+        };
+        current_info.title = title;
+    }
 }
 
 impl Dispatch<ExtImageCopyCaptureFrameV1, Arc<RwLock<CaptureInfo>>> for WayshotConnection {
-	fn event(
-		_state: &mut Self,
-		_proxy: &ExtImageCopyCaptureFrameV1,
-		event: <ExtImageCopyCaptureFrameV1 as Proxy>::Event,
-		data: &Arc<RwLock<CaptureInfo>>,
-		_conn: &Connection,
-		_qhandle: &wayland_client::QueueHandle<Self>,
-	) {
-		let mut data = data.write().unwrap();
-		match event {
-			ext_image_copy_capture_frame_v1::Event::Ready => {
-				data.state = FrameState::Succeeded;
-			}
-			ext_image_copy_capture_frame_v1::Event::Failed { reason } => {
-				data.state = FrameState::Failed(Some(reason))
-			}
-			ext_image_copy_capture_frame_v1::Event::Transform {
-				transform: WEnum::Value(transform),
-			} => {
-				data.transform = transform;
-			}
-			_ => {}
-		}
-	}
+    fn event(
+        _state: &mut Self,
+        _proxy: &ExtImageCopyCaptureFrameV1,
+        event: <ExtImageCopyCaptureFrameV1 as Proxy>::Event,
+        data: &Arc<RwLock<CaptureInfo>>,
+        _conn: &Connection,
+        _qhandle: &wayland_client::QueueHandle<Self>,
+    ) {
+        let mut data = data.write().unwrap();
+        match event {
+            ext_image_copy_capture_frame_v1::Event::Ready => {
+                data.state = FrameState::Succeeded;
+            }
+            ext_image_copy_capture_frame_v1::Event::Failed { reason } => {
+                data.state = FrameState::Failed(Some(reason))
+            }
+            ext_image_copy_capture_frame_v1::Event::Transform {
+                transform: WEnum::Value(transform),
+            } => {
+                data.transform = transform;
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Dispatch<ExtImageCopyCaptureSessionV1, Arc<RwLock<FrameInfo>>> for WayshotConnection {
-	fn event(
-		_state: &mut Self,
-		_proxy: &ExtImageCopyCaptureSessionV1,
-		event: <ExtImageCopyCaptureSessionV1 as Proxy>::Event,
-		data: &Arc<RwLock<FrameInfo>>,
-		_conn: &Connection,
-		_qhandle: &wayland_client::QueueHandle<Self>,
-	) {
-		let mut frame_info = data.write().unwrap();
-		match event {
-			ext_image_copy_capture_session_v1::Event::BufferSize { width, height } => {
-				if frame_info.buffer_size.is_none() {
-					frame_info.buffer_size = Some(Size { width, height });
-				}
-			}
-			ext_image_copy_capture_session_v1::Event::ShmFormat { format } => {
-				if frame_info.shm_format.is_none() {
-					frame_info.shm_format = Some(format);
-				}
-			}
-			ext_image_copy_capture_session_v1::Event::Done => {}
-			_ => {}
-		}
-	}
+    fn event(
+        _state: &mut Self,
+        _proxy: &ExtImageCopyCaptureSessionV1,
+        event: <ExtImageCopyCaptureSessionV1 as Proxy>::Event,
+        data: &Arc<RwLock<FrameInfo>>,
+        _conn: &Connection,
+        _qhandle: &wayland_client::QueueHandle<Self>,
+    ) {
+        let mut frame_info = data.write().unwrap();
+        match event {
+            ext_image_copy_capture_session_v1::Event::BufferSize { width, height } => {
+                if frame_info.buffer_size.is_none() {
+                    frame_info.buffer_size = Some(Size { width, height });
+                }
+            }
+            ext_image_copy_capture_session_v1::Event::ShmFormat { format } => {
+                if frame_info.shm_format.is_none() {
+                    frame_info.shm_format = Some(format);
+                }
+            }
+            ext_image_copy_capture_session_v1::Event::Done => {}
+            _ => {}
+        }
+    }
 }

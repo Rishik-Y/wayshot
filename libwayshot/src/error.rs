@@ -45,8 +45,8 @@ pub enum WayshotError {
     EGLError(#[from] khronos_egl::Error),
     #[error("No EGLImageTargetTexture2DOES function located, this extension may not be supported")]
     EGLImageToTexProcNotFoundError,
-	#[error("Not Support format")]
-	NotSupportFormat,
-	#[error("Capture Failed")]
-	CaptureFailed(String),
+    #[error("Not Support format")]
+    NotSupportFormat,
+    #[error("Capture Failed")]
+    CaptureFailed(String),
 }

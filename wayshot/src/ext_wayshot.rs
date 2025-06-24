@@ -1,9 +1,9 @@
 use image::{GenericImageView, ImageEncoder, ImageError};
 use std::{env, fs, path::PathBuf};
 
+use crate::utils::waysip_to_region;
 use dialoguer::FuzzySelect;
 use dialoguer::theme::ColorfulTheme;
-use crate::utils::waysip_to_region;
 use libwayshot::WayshotConnection;
 
 const TMP: &str = "/tmp";
@@ -70,10 +70,10 @@ pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>)
 }
 
 pub fn ext_capture_output(
-	state: &mut WayshotConnection,
-	output: Option<String>,
-	use_stdout: bool,
-	pointer: bool,
+    state: &mut WayshotConnection,
+    output: Option<String>,
+    use_stdout: bool,
+    pointer: bool,
 ) -> eyre::Result<WayshotResult, WayshotImageWriteError> {
     let outputs = state.outputs();
     let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
@@ -181,9 +181,9 @@ pub static SAVEPATH: LazyLock<PathBuf> = LazyLock::new(|| {
 });
 
 pub fn ext_capture_area(
-	state: &mut WayshotConnection,
-	use_stdout: bool,
-	pointer: bool,
+    state: &mut WayshotConnection,
+    use_stdout: bool,
+    pointer: bool,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let ImageViewInfo {
         data,
@@ -207,9 +207,10 @@ pub fn ext_capture_area(
         .ok_or(libwayshot::error::WayshotError::CaptureFailed(
             "Failed to capture the area".to_string(),
         ))?;
-        
+
         // Map the Result<LogicalRegion> directly to Result<Region>
-        waysip_to_region(info.size(), info.left_top_point()).map(|logical_region| logical_region.inner)
+        waysip_to_region(info.size(), info.left_top_point())
+            .map(|logical_region| logical_region.inner)
     })?;
 
     let mut buff = std::io::Cursor::new(Vec::new());
@@ -234,7 +235,7 @@ pub fn ext_capture_area(
 }
 
 pub fn ext_capture_color(
-	state: &mut WayshotConnection,
+    state: &mut WayshotConnection,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let ImageViewInfo {
         data,
@@ -258,9 +259,10 @@ pub fn ext_capture_color(
         .ok_or(libwayshot::error::WayshotError::CaptureFailed(
             "Failed to capture the area".to_string(),
         ))?;
-        
+
         // Map the Result<LogicalRegion> directly to Result<Region>
-        waysip_to_region(info.size(), info.left_top_point()).map(|logical_region| logical_region.inner)
+        waysip_to_region(info.size(), info.left_top_point())
+            .map(|logical_region| logical_region.inner)
     })?;
 
     let mut buff = std::io::Cursor::new(Vec::new());
