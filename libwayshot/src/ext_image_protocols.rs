@@ -272,481 +272,6 @@ pub struct HaruhiShotBase<T> {
     pub event_queue: Option<EventQueue<T>>,
 }
 
-/// This main state of HaruhiShot, We use it to do screen copy
-#[derive(Debug)]
-pub struct HaruhiShotState {
-    pub base: WayshotBase, // Connection, globals and output info
-	dmabuf_state: Option<DMABUFState>,
-	pub ext_image: Option<HaruhiShotBase<Self>>,
-}
-
-impl HaruhiShotState {
-    /// get all outputs and their info
-    pub fn outputs(&self) -> &Vec<OutputInfo> {
-        &self.base.output_infos
-    }
-
-    pub(crate) fn take_event_queue(&mut self) -> EventQueue<Self> {
-        self.ext_image
-            .as_mut()
-            .expect("ext_image should be initialized")
-            .event_queue
-            .take()
-            .expect("control your self")
-    }
-
-    pub(crate) fn output_image_manager(&self) -> &ExtOutputImageCaptureSourceManagerV1 {
-        self.ext_image
-            .as_ref()
-            .expect("ext_image should be initialized")
-            .output_image_manager
-            .as_ref()
-            .expect("Should init")
-    }
-
-    pub(crate) fn image_copy_capture_manager(&self) -> &ExtImageCopyCaptureManagerV1 {
-        self.ext_image
-            .as_ref()
-            .expect("ext_image should be initialized")
-            .img_copy_manager
-            .as_ref()
-            .expect("Should init")
-    }
-
-    pub(crate) fn qhandle(&self) -> &QueueHandle<Self> {
-        self.ext_image
-            .as_ref()
-            .expect("ext_image should be initialized")
-            .qh
-            .as_ref()
-            .expect("Should init")
-    }
-
-    pub(crate) fn shm(&self) -> &WlShm {
-        self.ext_image
-            .as_ref()
-            .expect("ext_image should be initialized")
-            .shm
-            .as_ref()
-            .expect("Should init")
-    }
-
-    pub(crate) fn reset_event_queue(&mut self, event_queue: EventQueue<Self>) {
-        self.ext_image
-            .as_mut()
-            .expect("ext_image should be initialized")
-            .event_queue = Some(event_queue);
-    }
-
-    pub fn connection(&self) -> &Connection {
-        &self.base.conn
-    }
-
-    pub fn globals(&self) -> &GlobalList {
-        &self.base.globals
-    }
-
-    pub fn new() -> Result<Self, HaruhiError> {
-        Self::from_ext_connection(None)
-    }
-
-    fn from_ext_connection(connection: Option<Connection>) -> Result<Self, HaruhiError> {
-        let conn = if let Some(conn) = connection {
-            conn
-        } else {
-            Connection::connect_to_env()?
-        };
-
-        let (globals, mut event_queue) = registry_queue_init::<HaruhiShotState>(&conn)?;
-
-        // Create a new state with the base fields
-        let mut state = Self {
-            base: WayshotBase {
-                conn,
-                globals,
-                output_infos: Vec::new(),
-            },
-            dmabuf_state: None, // Initialize dmabuf_state as None
-            ext_image: Some(HaruhiShotBase {
-                toplevels: Vec::new(),
-                img_copy_manager: None,
-                output_image_manager: None,
-                shm: None,
-                qh: None,
-                event_queue: None,
-            }),
-        };
-
-        // First refresh outputs to populate the output_infos
-        state.refresh_outputs(); //?;
-
-        let qh = event_queue.handle();
-
-        // Now bind to globals after outputs are refreshed
-        let image_manager = state
-            .base
-            .globals
-            .bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
-        let output_image_manager = state
-            .base
-            .globals
-            .bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
-        let shm = state.base.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
-        state
-            .base
-            .globals
-            .bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
-
-        // XDG output manager is already used in refresh_outputs, so we don't need to
-        // create it again and iterate through outputs here
-
-        event_queue.blocking_dispatch(&mut state)?;
-
-        // Store the globals we fetched
-        let ext_image = state
-            .ext_image
-            .as_mut()
-            .expect("ext_image should be initialized");
-        ext_image.img_copy_manager = Some(image_manager);
-        ext_image.output_image_manager = Some(output_image_manager);
-        ext_image.qh = Some(qh);
-        ext_image.shm = Some(shm);
-        ext_image.event_queue = Some(event_queue);
-
-        Ok(state)
-    }
-
-    /// refresh the outputs, to get new outputs
-    pub fn refresh_outputs(&mut self) -> crate::Result<()> {
-        // Connecting to wayland environment.
-        let mut state = OutputCaptureState {
-            outputs: Vec::new(),
-        };
-        let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
-        let qh = event_queue.handle();
-
-        // Bind to xdg_output global.
-        let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
-            &qh,
-            3..=3,
-            (),
-        ) {
-            Ok(x) => x,
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create ZxdgOutputManagerV1 version 3. Does your compositor implement ZxdgOutputManagerV1?"
-                );
-                panic!("{:#?}", e);
-            }
-        };
-
-        // Fetch all outputs; when their names arrive, add them to the list
-        let _ = self.base.conn.display().get_registry(&qh, ());
-        event_queue.roundtrip(&mut state)?;
-
-        // We loop over each output and request its position data.
-        // Also store the xdg_output reference in the OutputInfo
-        let xdg_outputs: Vec<ZxdgOutputV1> = state
-            .outputs
-            .iter_mut()
-            .enumerate()
-            .map(|(index, output)| {
-                let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
-                output.xdg_output = Some(xdg_output.clone());
-                xdg_output
-            })
-            .collect();
-
-        event_queue.roundtrip(&mut state)?;
-
-        for xdg_output in xdg_outputs {
-            xdg_output.destroy();
-        }
-
-        if state.outputs.is_empty() {
-            tracing::error!("Compositor did not advertise any wl_output devices!");
-            return Err(WayshotError::NoOutputs);
-        }
-        tracing::trace!("Outputs detected: {:#?}", state.outputs);
-        self.base.output_infos = state.outputs;
-
-        Ok(())
-    }
-
-    /// Capture a single output
-    pub fn ext_capture_single_output(
-        &mut self,
-        option: CaptureOption,
-        output: OutputInfo,
-    ) -> Result<ImageViewInfo, HaruhiError> {
-        let mem_fd = ext_create_shm_fd().unwrap();
-        let mem_file = File::from(mem_fd);
-        let CaptureOutputData {
-            width,
-            height,
-            frame_format,
-            ..
-        } = self.ext_capture_output_inner(
-            output.clone(),
-            option,
-            mem_file.as_fd(),
-            Some(&mem_file),
-        )?;
-
-        let mut frame_mmap = unsafe { MmapMut::map_mut(&mem_file).unwrap() };
-
-        let converter = crate::convert::create_converter(frame_format).unwrap();
-        let color_type = converter.convert_inplace(&mut frame_mmap);
-
-        // Create a full screen region representing the entire output
-        let region = output.logical_region.inner.clone();
-
-        Ok(ImageViewInfo {
-            data: frame_mmap.deref().into(),
-            width,
-            height,
-            color_type,
-            region,
-        })
-    }
-
-    fn ext_capture_output_inner<T: AsFd>(
-        &mut self,
-        OutputInfo {
-            output,
-            logical_region:
-                LogicalRegion {
-                    inner:
-                        Region {
-                            position: screen_position,
-                            size:
-                                Size {
-                                    width: real_width,
-                                    height: real_height,
-                                },
-                        },
-                },
-            //			logical_size:
-            //                Size {
-            //                    width: real_width,
-            //                    height: real_height,
-            //                },
-            //            position: screen_position,
-            ..
-        }: OutputInfo,
-        option: CaptureOption,
-        fd: T,
-        file: Option<&File>,
-    ) -> Result<CaptureOutputData, HaruhiError> {
-        let mut event_queue = self.take_event_queue();
-        let img_manager = self.output_image_manager();
-        let capture_manager = self.image_copy_capture_manager();
-        let qh = self.qhandle();
-
-        let source = img_manager.create_source(&output, qh, ());
-        let info = Arc::new(RwLock::new(FrameInfo::default()));
-        let session = capture_manager.create_session(&source, option.into(), qh, info.clone());
-
-        let capture_info = CaptureInfo::new();
-        let frame = session.create_frame(qh, capture_info.clone());
-        event_queue.blocking_dispatch(self).unwrap();
-        let qh = self.qhandle();
-
-        let shm = self.shm();
-        let info = info.read().unwrap();
-
-        let Size { width, height } = info.size();
-        let WEnum::Value(frame_format) = info.format() else {
-            return Err(HaruhiError::NotSupportFormat);
-        };
-        if !matches!(
-            frame_format,
-            Format::Xbgr2101010
-                | Format::Abgr2101010
-                | Format::Argb8888
-                | Format::Xrgb8888
-                | Format::Xbgr8888
-        ) {
-            return Err(HaruhiError::NotSupportFormat);
-        }
-        let frame_bytes = 4 * height * width;
-        let mem_fd = fd.as_fd();
-
-        if let Some(file) = file {
-            file.set_len(frame_bytes as u64).unwrap();
-        }
-
-        let stride = 4 * width;
-
-        let shm_pool = shm.create_pool(mem_fd, (width * height * 4) as i32, qh, ());
-        let buffer = shm_pool.create_buffer(
-            0,
-            width as i32,
-            height as i32,
-            stride as i32,
-            frame_format,
-            qh,
-            (),
-        );
-        frame.attach_buffer(&buffer);
-        frame.capture();
-
-        let transform;
-        loop {
-            event_queue.blocking_dispatch(self)?;
-            let info = capture_info.read().unwrap();
-            match info.state() {
-                FrameState::Succeeded => {
-                    transform = info.transform();
-                    break;
-                }
-                FrameState::Failed(info) => match info {
-                    Some(WEnum::Value(reason)) => match reason {
-                        FailureReason::Stopped => {
-                            return Err(HaruhiError::CaptureFailed("Stopped".to_owned()));
-                        }
-
-                        FailureReason::BufferConstraints => {
-                            return Err(HaruhiError::CaptureFailed("BufferConstraints".to_owned()));
-                        }
-                        FailureReason::Unknown | _ => {
-                            return Err(HaruhiError::CaptureFailed("Unknown".to_owned()));
-                        }
-                    },
-                    Some(WEnum::Unknown(code)) => {
-                        return Err(HaruhiError::CaptureFailed(format!(
-                            "Unknown reason, code : {code}"
-                        )));
-                    }
-                    None => {
-                        return Err(HaruhiError::CaptureFailed(
-                            "No failure reason provided".to_owned(),
-                        ));
-                    }
-                },
-                FrameState::Pending => {}
-            }
-        }
-
-        self.reset_event_queue(event_queue);
-
-        Ok(CaptureOutputData {
-            output,
-            buffer,
-            width,
-            height,
-            frame_bytes,
-            stride,
-            frame_format,
-            real_width: real_width as u32,
-            real_height: real_height as u32,
-            transform,
-            screen_position,
-        })
-    }
-
-    pub fn ext_capture_area2<F>(
-        &mut self,
-        option: CaptureOption,
-        callback: F,
-    ) -> Result<ImageViewInfo, HaruhiError>
-    where
-        F: AreaSelectCallback,
-    {
-        let outputs = self.outputs().clone();
-
-        let mut data_list = vec![];
-        for data in outputs.into_iter() {
-            let mem_fd = ext_create_shm_fd().unwrap();
-            let mem_file = File::from(mem_fd);
-            let data =
-                self.ext_capture_output_inner(data, option, mem_file.as_fd(), Some(&mem_file))?;
-            data_list.push(AreaShotInfo { data, mem_file })
-        }
-
-        let mut state = XdgShellState::new();
-        let mut event_queue: EventQueue<XdgShellState> = self.connection().new_event_queue();
-        let globals = self.globals();
-        let qh = event_queue.handle();
-
-        let compositor = globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ())?;
-        let xdg_wm_base = globals.bind::<XdgWmBase, _, _>(&qh, 1..=1, ())?;
-        let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ())?;
-
-        let mut xdg_surfaces: Vec<(WlSurface, XdgSurface, XdgToplevel)> =
-            Vec::with_capacity(data_list.len());
-        for AreaShotInfo { data, .. } in data_list.iter() {
-            let CaptureOutputData {
-                output,
-                buffer,
-                real_width,
-                real_height,
-                transform,
-                ..
-            } = data;
-            let surface = compositor.create_surface(&qh, ());
-
-            let xdg_surface = xdg_wm_base.get_xdg_surface(&surface, &qh, output.clone());
-            let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
-
-            // Configure the toplevel to be fullscreen on the specific output
-            xdg_toplevel.set_fullscreen(Some(output));
-            xdg_toplevel.set_title("wayshot-overlay".to_string());
-            xdg_toplevel.set_app_id("wayshot".to_string());
-
-            debug!("Committing surface creation changes.");
-            surface.commit();
-
-            debug!("Waiting for layer surface to be configured.");
-            while !state.configured_surfaces.contains(&xdg_surface) {
-                event_queue.blocking_dispatch(&mut state)?;
-            }
-
-            surface.set_buffer_transform(*transform);
-            // surface.set_buffer_scale(output_info.scale());
-            surface.attach(Some(buffer), 0, 0);
-
-            let viewport = viewporter.get_viewport(&surface, &qh, ());
-            viewport.set_destination(*real_width as i32, *real_height as i32);
-
-            debug!("Committing surface with attached buffer.");
-            surface.commit();
-            xdg_surfaces.push((surface, xdg_surface, xdg_toplevel));
-            event_queue.blocking_dispatch(&mut state)?;
-        }
-
-        let region_re = callback.slurp(self);
-
-        debug!("Unmapping and destroying layer shell surfaces.");
-        for (surface, xdg_surface, xdg_toplevel) in xdg_surfaces.iter() {
-            surface.attach(None, 0, 0);
-            surface.commit(); // unmap surface by committing a null buffer
-            xdg_toplevel.destroy();
-            xdg_surface.destroy();
-        }
-        event_queue.roundtrip(&mut state)?;
-        let region = region_re?;
-
-        let shotdata = data_list
-            .iter()
-            .find(|data| data.in_this_screen(region))
-            .ok_or(HaruhiError::CaptureFailed("not in region".to_owned()))?;
-        let area = shotdata.clip_area(region).expect("should have");
-        let mut frame_mmap = unsafe { MmapMut::map_mut(&shotdata.mem_file).unwrap() };
-
-        let converter = crate::convert::create_converter(shotdata.data.frame_format).unwrap();
-        let color_type = converter.convert_inplace(&mut frame_mmap);
-
-        Ok(ImageViewInfo {
-            data: frame_mmap.deref().into(),
-            width: shotdata.data.width,
-            height: shotdata.data.height,
-            color_type,
-            region: area,
-        })
-    }
-}
-
 use nix::{
     fcntl,
     sys::{memfd, mman, stat},
@@ -893,45 +418,6 @@ impl Dispatch<ExtForeignToplevelHandleV1, ()> for HaruhiShotState {
     }
 }
 
-impl Dispatch<ZxdgOutputV1, ()> for HaruhiShotState {
-    fn event(
-        state: &mut Self,
-        proxy: &ZxdgOutputV1,
-        event: <ZxdgOutputV1 as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qhandle: &QueueHandle<Self>,
-    ) {
-        let Some(data) =
-            state
-                .base
-                .output_infos
-                .iter_mut()
-                .find(|OutputInfo { xdg_output, .. }| {
-                    xdg_output.as_ref().expect("we need to init here") == proxy
-                })
-        else {
-            return;
-        };
-
-        match event {
-            zxdg_output_v1::Event::LogicalPosition { x, y } => {
-                data.logical_region.inner.position = Position { x, y }
-            }
-            zxdg_output_v1::Event::LogicalSize { width, height } => {
-                data.logical_region.inner.size = Size {
-                    width: width as u32,
-                    height: height as u32,
-                }
-            }
-            zxdg_output_v1::Event::Description { description } => {
-                data.description = description;
-            }
-            _ => {}
-        }
-    }
-}
-
 impl Dispatch<ExtImageCopyCaptureFrameV1, Arc<RwLock<CaptureInfo>>> for HaruhiShotState {
     fn event(
         _state: &mut Self,
@@ -986,69 +472,477 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, Arc<RwLock<FrameInfo>>> for HaruhiSh
     }
 }
 
-impl Dispatch<wl_registry::WlRegistry, ()> for HaruhiShotState {
-    fn event(
-        state: &mut Self,
-        proxy: &wl_registry::WlRegistry,
-        event: <wl_registry::WlRegistry as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &wayland_client::Connection,
-        qh: &wayland_client::QueueHandle<Self>,
-    ) {
-        if let wl_registry::Event::Global {
-            name,
-            interface,
-            version,
-        } = event
-        {
-            if interface == WlOutput::interface().name {
-                state
-                    .base
-                    .output_infos
-                    .push(OutputInfo::new(proxy.bind(name, version, qh, ())));
-            }
-        }
-    }
+/// This main state of HaruhiShot, We use it to do screen copy
+#[derive(Debug)]
+pub struct HaruhiShotState {
+	pub base: WayshotBase, // Connection, globals and output info
+	dmabuf_state: Option<DMABUFState>,
+	pub ext_image: Option<HaruhiShotBase<Self>>,
 }
 
-impl Dispatch<WlOutput, ()> for HaruhiShotState {
-    fn event(
-        state: &mut Self,
-        proxy: &WlOutput,
-        event: <WlOutput as Proxy>::Event,
-        _data: &(),
-        _conn: &wayland_client::Connection,
-        _qhandle: &wayland_client::QueueHandle<Self>,
-    ) {
-        let Some(data) = state
-            .base
-            .output_infos
-            .iter_mut()
-            .find(|OutputInfo { output, .. }| output == proxy)
-        else {
-            return;
-        };
+impl HaruhiShotState {
+	/// get all outputs and their info
+	pub fn outputs(&self) -> &Vec<OutputInfo> {
+		&self.base.output_infos
+	}
 
-        match event {
-            wl_output::Event::Name { name } => {
-                data.name = name;
-            }
-            wl_output::Event::Scale { factor } => {
-                data.scale = factor;
-            }
-            wl_output::Event::Mode { width, height, .. } => {
-                data.physical_size = Size {
-                    width: width as u32,
-                    height: height as u32,
-                };
-            }
-            wl_output::Event::Geometry {
-                transform: WEnum::Value(transform),
-                ..
-            } => {
-                data.transform = transform;
-            }
-            _ => {}
-        }
-    }
+	pub(crate) fn take_event_queue(&mut self) -> EventQueue<Self> {
+		self.ext_image
+			.as_mut()
+			.expect("ext_image should be initialized")
+			.event_queue
+			.take()
+			.expect("control your self")
+	}
+
+	pub(crate) fn output_image_manager(&self) -> &ExtOutputImageCaptureSourceManagerV1 {
+		self.ext_image
+			.as_ref()
+			.expect("ext_image should be initialized")
+			.output_image_manager
+			.as_ref()
+			.expect("Should init")
+	}
+
+	pub(crate) fn image_copy_capture_manager(&self) -> &ExtImageCopyCaptureManagerV1 {
+		self.ext_image
+			.as_ref()
+			.expect("ext_image should be initialized")
+			.img_copy_manager
+			.as_ref()
+			.expect("Should init")
+	}
+
+	pub(crate) fn qhandle(&self) -> &QueueHandle<Self> {
+		self.ext_image
+			.as_ref()
+			.expect("ext_image should be initialized")
+			.qh
+			.as_ref()
+			.expect("Should init")
+	}
+
+	pub(crate) fn shm(&self) -> &WlShm {
+		self.ext_image
+			.as_ref()
+			.expect("ext_image should be initialized")
+			.shm
+			.as_ref()
+			.expect("Should init")
+	}
+
+	pub(crate) fn reset_event_queue(&mut self, event_queue: EventQueue<Self>) {
+		self.ext_image
+			.as_mut()
+			.expect("ext_image should be initialized")
+			.event_queue = Some(event_queue);
+	}
+
+	pub fn connection(&self) -> &Connection {
+		&self.base.conn
+	}
+
+	pub fn globals(&self) -> &GlobalList {
+		&self.base.globals
+	}
+
+	pub fn new() -> Result<Self, HaruhiError> {
+		Self::from_ext_connection(None)
+	}
+
+	fn from_ext_connection(connection: Option<Connection>) -> Result<Self, HaruhiError> {
+		let conn = if let Some(conn) = connection {
+			conn
+		} else {
+			Connection::connect_to_env()?
+		};
+
+		let (globals, mut event_queue) = registry_queue_init::<HaruhiShotState>(&conn)?;
+
+		// Create a new state with the base fields
+		let mut state = Self {
+			base: WayshotBase {
+				conn,
+				globals,
+				output_infos: Vec::new(),
+			},
+			dmabuf_state: None, // Initialize dmabuf_state as None
+			ext_image: Some(HaruhiShotBase {
+				toplevels: Vec::new(),
+				img_copy_manager: None,
+				output_image_manager: None,
+				shm: None,
+				qh: None,
+				event_queue: None,
+			}),
+		};
+
+		// First refresh outputs to populate the output_infos
+		state.refresh_outputs(); //?;
+
+		let qh = event_queue.handle();
+
+		// Now bind to globals after outputs are refreshed
+		let image_manager = state
+			.base
+			.globals
+			.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
+		let output_image_manager = state
+			.base
+			.globals
+			.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
+		let shm = state.base.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
+		state
+			.base
+			.globals
+			.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
+
+		// XDG output manager is already used in refresh_outputs, so we don't need to
+		// create it again and iterate through outputs here
+
+		event_queue.blocking_dispatch(&mut state)?;
+
+		// Store the globals we fetched
+		let ext_image = state
+			.ext_image
+			.as_mut()
+			.expect("ext_image should be initialized");
+		ext_image.img_copy_manager = Some(image_manager);
+		ext_image.output_image_manager = Some(output_image_manager);
+		ext_image.qh = Some(qh);
+		ext_image.shm = Some(shm);
+		ext_image.event_queue = Some(event_queue);
+
+		Ok(state)
+	}
+
+	/// refresh the outputs, to get new outputs
+	pub fn refresh_outputs(&mut self) -> crate::Result<()> {
+		// Connecting to wayland environment.
+		let mut state = OutputCaptureState {
+			outputs: Vec::new(),
+		};
+		let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
+		let qh = event_queue.handle();
+
+		// Bind to xdg_output global.
+		let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
+			&qh,
+			3..=3,
+			(),
+		) {
+			Ok(x) => x,
+			Err(e) => {
+				tracing::error!(
+                    "Failed to create ZxdgOutputManagerV1 version 3. Does your compositor implement ZxdgOutputManagerV1?"
+                );
+				panic!("{:#?}", e);
+			}
+		};
+
+		// Fetch all outputs; when their names arrive, add them to the list
+		let _ = self.base.conn.display().get_registry(&qh, ());
+		event_queue.roundtrip(&mut state)?;
+
+		// We loop over each output and request its position data.
+		// Also store the xdg_output reference in the OutputInfo
+		let xdg_outputs: Vec<ZxdgOutputV1> = state
+			.outputs
+			.iter_mut()
+			.enumerate()
+			.map(|(index, output)| {
+				let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
+				output.xdg_output = Some(xdg_output.clone());
+				xdg_output
+			})
+			.collect();
+
+		event_queue.roundtrip(&mut state)?;
+
+		for xdg_output in xdg_outputs {
+			xdg_output.destroy();
+		}
+
+		if state.outputs.is_empty() {
+			tracing::error!("Compositor did not advertise any wl_output devices!");
+			return Err(WayshotError::NoOutputs);
+		}
+		tracing::trace!("Outputs detected: {:#?}", state.outputs);
+		self.base.output_infos = state.outputs;
+
+		Ok(())
+	}
+
+	/// Capture a single output
+	pub fn ext_capture_single_output(
+		&mut self,
+		option: CaptureOption,
+		output: OutputInfo,
+	) -> Result<ImageViewInfo, HaruhiError> {
+		let mem_fd = ext_create_shm_fd().unwrap();
+		let mem_file = File::from(mem_fd);
+		let CaptureOutputData {
+			width,
+			height,
+			frame_format,
+			..
+		} = self.ext_capture_output_inner(
+			output.clone(),
+			option,
+			mem_file.as_fd(),
+			Some(&mem_file),
+		)?;
+
+		let mut frame_mmap = unsafe { MmapMut::map_mut(&mem_file).unwrap() };
+
+		let converter = crate::convert::create_converter(frame_format).unwrap();
+		let color_type = converter.convert_inplace(&mut frame_mmap);
+
+		// Create a full screen region representing the entire output
+		let region = output.logical_region.inner.clone();
+
+		Ok(ImageViewInfo {
+			data: frame_mmap.deref().into(),
+			width,
+			height,
+			color_type,
+			region,
+		})
+	}
+
+	fn ext_capture_output_inner<T: AsFd>(
+		&mut self,
+		OutputInfo {
+			output,
+			logical_region:
+			LogicalRegion {
+				inner:
+				Region {
+					position: screen_position,
+					size:
+					Size {
+						width: real_width,
+						height: real_height,
+					},
+				},
+			},
+			//			logical_size:
+			//                Size {
+			//                    width: real_width,
+			//                    height: real_height,
+			//                },
+			//            position: screen_position,
+			..
+		}: OutputInfo,
+		option: CaptureOption,
+		fd: T,
+		file: Option<&File>,
+	) -> Result<CaptureOutputData, HaruhiError> {
+		let mut event_queue = self.take_event_queue();
+		let img_manager = self.output_image_manager();
+		let capture_manager = self.image_copy_capture_manager();
+		let qh = self.qhandle();
+
+		let source = img_manager.create_source(&output, qh, ());
+		let info = Arc::new(RwLock::new(FrameInfo::default()));
+		let session = capture_manager.create_session(&source, option.into(), qh, info.clone());
+
+		let capture_info = CaptureInfo::new();
+		let frame = session.create_frame(qh, capture_info.clone());
+		event_queue.blocking_dispatch(self).unwrap();
+		let qh = self.qhandle();
+
+		let shm = self.shm();
+		let info = info.read().unwrap();
+
+		let Size { width, height } = info.size();
+		let WEnum::Value(frame_format) = info.format() else {
+			return Err(HaruhiError::NotSupportFormat);
+		};
+		if !matches!(
+            frame_format,
+            Format::Xbgr2101010
+                | Format::Abgr2101010
+                | Format::Argb8888
+                | Format::Xrgb8888
+                | Format::Xbgr8888
+        ) {
+			return Err(HaruhiError::NotSupportFormat);
+		}
+		let frame_bytes = 4 * height * width;
+		let mem_fd = fd.as_fd();
+
+		if let Some(file) = file {
+			file.set_len(frame_bytes as u64).unwrap();
+		}
+
+		let stride = 4 * width;
+
+		let shm_pool = shm.create_pool(mem_fd, (width * height * 4) as i32, qh, ());
+		let buffer = shm_pool.create_buffer(
+			0,
+			width as i32,
+			height as i32,
+			stride as i32,
+			frame_format,
+			qh,
+			(),
+		);
+		frame.attach_buffer(&buffer);
+		frame.capture();
+
+		let transform;
+		loop {
+			event_queue.blocking_dispatch(self)?;
+			let info = capture_info.read().unwrap();
+			match info.state() {
+				FrameState::Succeeded => {
+					transform = info.transform();
+					break;
+				}
+				FrameState::Failed(info) => match info {
+					Some(WEnum::Value(reason)) => match reason {
+						FailureReason::Stopped => {
+							return Err(HaruhiError::CaptureFailed("Stopped".to_owned()));
+						}
+
+						FailureReason::BufferConstraints => {
+							return Err(HaruhiError::CaptureFailed("BufferConstraints".to_owned()));
+						}
+						FailureReason::Unknown | _ => {
+							return Err(HaruhiError::CaptureFailed("Unknown".to_owned()));
+						}
+					},
+					Some(WEnum::Unknown(code)) => {
+						return Err(HaruhiError::CaptureFailed(format!(
+							"Unknown reason, code : {code}"
+						)));
+					}
+					None => {
+						return Err(HaruhiError::CaptureFailed(
+							"No failure reason provided".to_owned(),
+						));
+					}
+				},
+				FrameState::Pending => {}
+			}
+		}
+
+		self.reset_event_queue(event_queue);
+
+		Ok(CaptureOutputData {
+			output,
+			buffer,
+			width,
+			height,
+			frame_bytes,
+			stride,
+			frame_format,
+			real_width: real_width as u32,
+			real_height: real_height as u32,
+			transform,
+			screen_position,
+		})
+	}
+
+	pub fn ext_capture_area2<F>(
+		&mut self,
+		option: CaptureOption,
+		callback: F,
+	) -> Result<ImageViewInfo, HaruhiError>
+	where
+		F: AreaSelectCallback,
+	{
+		let outputs = self.outputs().clone();
+
+		let mut data_list = vec![];
+		for data in outputs.into_iter() {
+			let mem_fd = ext_create_shm_fd().unwrap();
+			let mem_file = File::from(mem_fd);
+			let data =
+				self.ext_capture_output_inner(data, option, mem_file.as_fd(), Some(&mem_file))?;
+			data_list.push(AreaShotInfo { data, mem_file })
+		}
+
+		let mut state = XdgShellState::new();
+		let mut event_queue: EventQueue<XdgShellState> = self.connection().new_event_queue();
+		let globals = self.globals();
+		let qh = event_queue.handle();
+
+		let compositor = globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ())?;
+		let xdg_wm_base = globals.bind::<XdgWmBase, _, _>(&qh, 1..=1, ())?;
+		let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ())?;
+
+		let mut xdg_surfaces: Vec<(WlSurface, XdgSurface, XdgToplevel)> =
+			Vec::with_capacity(data_list.len());
+		for AreaShotInfo { data, .. } in data_list.iter() {
+			let CaptureOutputData {
+				output,
+				buffer,
+				real_width,
+				real_height,
+				transform,
+				..
+			} = data;
+			let surface = compositor.create_surface(&qh, ());
+
+			let xdg_surface = xdg_wm_base.get_xdg_surface(&surface, &qh, output.clone());
+			let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
+
+			// Configure the toplevel to be fullscreen on the specific output
+			xdg_toplevel.set_fullscreen(Some(output));
+			xdg_toplevel.set_title("wayshot-overlay".to_string());
+			xdg_toplevel.set_app_id("wayshot".to_string());
+
+			debug!("Committing surface creation changes.");
+			surface.commit();
+
+			debug!("Waiting for layer surface to be configured.");
+			while !state.configured_surfaces.contains(&xdg_surface) {
+				event_queue.blocking_dispatch(&mut state)?;
+			}
+
+			surface.set_buffer_transform(*transform);
+			// surface.set_buffer_scale(output_info.scale());
+			surface.attach(Some(buffer), 0, 0);
+
+			let viewport = viewporter.get_viewport(&surface, &qh, ());
+			viewport.set_destination(*real_width as i32, *real_height as i32);
+
+			debug!("Committing surface with attached buffer.");
+			surface.commit();
+			xdg_surfaces.push((surface, xdg_surface, xdg_toplevel));
+			event_queue.blocking_dispatch(&mut state)?;
+		}
+
+		let region_re = callback.slurp(self);
+
+		debug!("Unmapping and destroying layer shell surfaces.");
+		for (surface, xdg_surface, xdg_toplevel) in xdg_surfaces.iter() {
+			surface.attach(None, 0, 0);
+			surface.commit(); // unmap surface by committing a null buffer
+			xdg_toplevel.destroy();
+			xdg_surface.destroy();
+		}
+		event_queue.roundtrip(&mut state)?;
+		let region = region_re?;
+
+		let shotdata = data_list
+			.iter()
+			.find(|data| data.in_this_screen(region))
+			.ok_or(HaruhiError::CaptureFailed("not in region".to_owned()))?;
+		let area = shotdata.clip_area(region).expect("should have");
+		let mut frame_mmap = unsafe { MmapMut::map_mut(&shotdata.mem_file).unwrap() };
+
+		let converter = crate::convert::create_converter(shotdata.data.frame_format).unwrap();
+		let color_type = converter.convert_inplace(&mut frame_mmap);
+
+		Ok(ImageViewInfo {
+			data: frame_mmap.deref().into(),
+			width: shotdata.data.width,
+			height: shotdata.data.height,
+			color_type,
+			region: area,
+		})
+	}
 }
