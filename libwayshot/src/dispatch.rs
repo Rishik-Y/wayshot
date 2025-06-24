@@ -85,7 +85,6 @@ impl Dispatch<WlRegistry, ()> for OutputCaptureState {
                         physical_size: Size::default(),
                         logical_region: LogicalRegion::default(),
                         scale: 1,
-                        xdg_output: None,
                     });
                 } else {
                     tracing::error!("Ignoring a wl_output with version < 4.");
