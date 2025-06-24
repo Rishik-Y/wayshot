@@ -35,17 +35,4 @@ impl OutputInfo {
     pub fn name(&self) -> &str {
         &self.name
     }
-
-    pub(crate) fn new(output: WlOutput) -> Self {
-        Self {
-            output,
-            logical_region: LogicalRegion::default(),
-            physical_size: Size::default(),
-            name: "".to_owned(),
-            description: "".to_owned(),
-            xdg_output: None,
-            transform: wl_output::Transform::Normal,
-            scale: 1,
-        }
-    }
 }
