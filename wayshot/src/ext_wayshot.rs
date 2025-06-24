@@ -3,8 +3,8 @@ use std::{env, fs, path::PathBuf};
 
 use dialoguer::FuzzySelect;
 use dialoguer::theme::ColorfulTheme;
-use libwayshot::ext_image_protocols::HaruhiShotState;
 use crate::utils::waysip_to_region;
+use libwayshot::WayshotConnection;
 
 const TMP: &str = "/tmp";
 
@@ -70,10 +70,10 @@ pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>)
 }
 
 pub fn ext_capture_output(
-    state: &mut HaruhiShotState,
-    output: Option<String>,
-    use_stdout: bool,
-    pointer: bool,
+	state: &mut WayshotConnection,
+	output: Option<String>,
+	use_stdout: bool,
+	pointer: bool,
 ) -> eyre::Result<WayshotResult, WayshotImageWriteError> {
     let outputs = state.outputs();
     let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
@@ -181,9 +181,9 @@ pub static SAVEPATH: LazyLock<PathBuf> = LazyLock::new(|| {
 });
 
 pub fn ext_capture_area(
-    state: &mut HaruhiShotState,
-    use_stdout: bool,
-    pointer: bool,
+	state: &mut WayshotConnection,
+	use_stdout: bool,
+	pointer: bool,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let ImageViewInfo {
         data,
@@ -195,7 +195,7 @@ pub fn ext_capture_area(
                 position: Position { x, y },
                 size: Size { width, height },
             },
-    } = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &HaruhiShotState| {
+    } = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
                 connection: w_conn.connection(),
@@ -234,7 +234,7 @@ pub fn ext_capture_area(
 }
 
 pub fn ext_capture_color(
-    state: &mut HaruhiShotState,
+	state: &mut WayshotConnection,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let ImageViewInfo {
         data,
@@ -246,7 +246,7 @@ pub fn ext_capture_color(
                 position: Position { x, y },
                 size: Size { width, height },
             },
-    } = state.ext_capture_area2(CaptureOption::None, |w_conn: &HaruhiShotState| {
+    } = state.ext_capture_area2(CaptureOption::None, |w_conn: &WayshotConnection| {
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
                 connection: w_conn.connection(),

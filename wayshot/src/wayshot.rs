@@ -6,8 +6,6 @@ use std::{
 
 use clap::Parser;
 use eyre::{Result, bail};
-pub use libwayshot::WayshotConnection;
-use libwayshot::ext_image_protocols::HaruhiShotState;
 
 mod cli;
 mod config;
@@ -17,7 +15,6 @@ mod utils;
 use ext_wayshot::*;
 
 use dialoguer::{FuzzySelect, theme::ColorfulTheme};
-use utils::waysip_to_region;
 
 use wl_clipboard_rs::copy::{MimeType, Options, Source};
 
@@ -115,7 +112,7 @@ fn main() -> Result<()> {
     let testing = true; // Set to true for testing purposes, can be removed later
     if testing {
         // Try to use ext_image_* protocol first
-        if let Ok(mut state) = HaruhiShotState::new() {
+        if let Ok(mut state) = libwayshot::WayshotConnection::new() {
             // Using ext_image_* protocol
             if cli.list_outputs {
                 let outputs = state.outputs();
@@ -142,7 +139,7 @@ fn main() -> Result<()> {
         // Fallback to wlr_screencopy if ext_image_* protocol isn't available
         tracing::info!("ext_image protocol not available, falling back to wlr_screencopy");
 
-        let wayshot_conn = WayshotConnection::new()?;
+        let wayshot_conn = libwayshot::WayshotConnection_main::new()?;
 
         let stdout = io::stdout();
         let mut writer = BufWriter::new(stdout.lock());
@@ -177,7 +174,7 @@ fn main() -> Result<()> {
                     .ok_or(libwayshot::WayshotError::FreezeCallbackError(
                         "Failed to capture the area".to_string(),
                     ))?;
-                    waysip_to_region(info.size(), info.left_top_point())
+					utils::waysip_to_region(info.size(), info.left_top_point())
                 },
                 cursor,
             )?
