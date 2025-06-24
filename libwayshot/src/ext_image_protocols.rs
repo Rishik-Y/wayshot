@@ -74,6 +74,7 @@ use crate::dispatch::{DMABUFState, FrameState, OutputCaptureState, XdgShellState
 use crate::output::OutputInfo;
 use crate::region::{LogicalRegion, Position, Region, Size};
 use crate::WayshotError; // Removed WayshotBase import
+use crate::WayshotConnection;
 
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
@@ -261,8 +262,9 @@ impl AreaShotInfo {
         })
     }
 }
+
 #[derive(Debug)]
-pub struct HaruhiShotBase<T> {
+pub struct ExtBase<T> {
     pub toplevels: Vec<TopLevel>,
     pub img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
     pub output_image_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
@@ -346,5 +348,3 @@ pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
         }
     }
 }
-
-use crate::WayshotConnection;

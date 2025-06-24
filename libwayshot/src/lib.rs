@@ -68,7 +68,7 @@ pub mod reexport {
     use wayland_client::protocol::wl_output;
     pub use wl_output::{Transform, WlOutput};
 }
-use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, FrameInfo, HaruhiShotBase, ImageViewInfo, TopLevel};
+use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, FrameInfo, ExtBase, ImageViewInfo, TopLevel};
 use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 use wayland_backend::protocol::WEnum;
 use wayland_client::globals::GlobalListContents;
@@ -102,7 +102,7 @@ pub struct WayshotConnection {
     pub globals: GlobalList,
     pub output_infos: Vec<OutputInfo>, // Make this pub so it can be used in ext_image_protocols
     dmabuf_state: Option<DMABUFState>,
-    pub ext_image: Option<HaruhiShotBase<Self>>,
+    pub ext_image: Option<ExtBase<Self>>,
 }
 
 impl WayshotConnection {
@@ -1294,7 +1294,7 @@ impl WayshotConnection {
             globals,
             output_infos: Vec::new(),
             dmabuf_state: None, // Initialize dmabuf_state as None
-            ext_image: Some(HaruhiShotBase {
+            ext_image: Some(ExtBase {
                 toplevels: Vec::new(),
                 img_copy_manager: None,
                 output_image_manager: None,
