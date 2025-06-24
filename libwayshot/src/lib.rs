@@ -97,15 +97,10 @@ use crate::region::Region;
 /// ```
 
 #[derive(Debug)]
-pub struct WayshotBase {
+pub struct WayshotConnection {
     pub conn: Connection,
     pub globals: GlobalList,
     pub output_infos: Vec<OutputInfo>, // Make this pub so it can be used in ext_image_protocols
-}
-
-#[derive(Debug)]
-pub struct WayshotConnection {
-    pub base: WayshotBase,
     dmabuf_state: Option<DMABUFState>,
     pub ext_image: Option<HaruhiShotBase<Self>>,
 }
@@ -126,13 +121,10 @@ impl WayshotConnection {
         };
         let (globals, mut event_queue) = registry_queue_init::<WayshotState>(&conn)?;
 
-        let base = WayshotBase {
+        let mut initial_state = Self {
             conn,
             globals,
             output_infos: Vec::new(),
-        };
-        let mut initial_state = Self {
-            base,
             dmabuf_state: None,
             ext_image: None,
         };
@@ -155,11 +147,9 @@ impl WayshotConnection {
         // init a GBM device
         let gbm = GBMDevice::new(gpu).unwrap();
         let mut initial_state = Self {
-            base: WayshotBase {
-                conn,
-                globals,
-                output_infos: Vec::new(),
-            },
+            conn,
+            globals,
+            output_infos: Vec::new(),
             dmabuf_state: Some(DMABUFState {
                 linux_dmabuf,
                 gbmdev: gbm,
@@ -178,11 +168,11 @@ impl WayshotConnection {
         let mut state = OutputCaptureState {
             outputs: Vec::new(),
         };
-        let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
+        let mut event_queue = self.conn.new_event_queue::<OutputCaptureState>();
         let qh = event_queue.handle();
 
         // Bind to xdg_output global.
-        let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
+        let zxdg_output_manager = match self.globals.bind::<ZxdgOutputManagerV1, _, _>(
             &qh,
             3..=3,
             (),
@@ -197,7 +187,7 @@ impl WayshotConnection {
         };
 
         // Fetch all outputs; when their names arrive, add them to the list
-        let _ = self.base.conn.display().get_registry(&qh, ());
+        let _ = self.conn.display().get_registry(&qh, ());
         event_queue.roundtrip(&mut state)?;
 
         // We loop over each output and request its position data.
@@ -224,14 +214,14 @@ impl WayshotConnection {
             return Err(WayshotError::NoOutputs);
         }
         tracing::trace!("Outputs detected: {:#?}", state.outputs);
-        self.base.output_infos = state.outputs;
+        self.output_infos = state.outputs;
 
         Ok(())
     }
 
     /// Fetch all accessible wayland outputs.
     pub fn get_all_outputs(&self) -> &[OutputInfo] {
-        self.base.output_infos.as_slice()
+        self.output_infos.as_slice()
     }
 
     /// print the displays' info
@@ -374,7 +364,7 @@ impl WayshotConnection {
         capture_region: Option<EmbeddedRegion>,
     ) -> Result<EGLImageGuard<'a, T>> {
         let egl_display = unsafe {
-            match egl_instance.get_display(self.base.conn.display().id().as_ptr() as *mut c_void) {
+            match egl_instance.get_display(self.conn.display().id().as_ptr() as *mut c_void) {
                 Some(disp) => disp,
                 None => return Err(egl_instance.get_error().unwrap().into()),
             }
@@ -542,11 +532,11 @@ impl WayshotConnection {
             state: None,
             buffer_done: AtomicBool::new(false),
         };
-        let mut event_queue = self.base.conn.new_event_queue::<CaptureFrameState>();
+        let mut event_queue = self.conn.new_event_queue::<CaptureFrameState>();
         let qh = event_queue.handle();
 
         // Instantiating screencopy manager.
-        let screencopy_manager = match self.base.globals.bind::<ZwlrScreencopyManagerV1, _, _>(
+        let screencopy_manager = match self.globals.bind::<ZwlrScreencopyManagerV1, _, _>(
             &qh,
             3..=3,
             (),
@@ -632,11 +622,11 @@ impl WayshotConnection {
             state: None,
             buffer_done: AtomicBool::new(false),
         };
-        let mut event_queue = self.base.conn.new_event_queue::<CaptureFrameState>();
+        let mut event_queue = self.conn.new_event_queue::<CaptureFrameState>();
         let qh = event_queue.handle();
 
         // Instantiating screencopy manager.
-        let screencopy_manager = match self.base.globals.bind::<ZwlrScreencopyManagerV1, _, _>(
+        let screencopy_manager = match self.globals.bind::<ZwlrScreencopyManagerV1, _, _>(
             &qh,
             3..=3,
             (),
@@ -773,7 +763,7 @@ impl WayshotConnection {
         let qh = event_queue.handle();
 
         // Instantiate shm global.
-        let shm = self.base.globals.bind::<WlShm, _, _>(&qh, 1..=1, ())?;
+        let shm = self.globals.bind::<WlShm, _, _>(&qh, 1..=1, ())?;
         let shm_pool = shm.create_pool(
             fd.as_fd(),
             frame_format
@@ -899,10 +889,10 @@ impl WayshotConnection {
     {
         let mut state = XdgShellState::new();
         let mut event_queue: EventQueue<XdgShellState> =
-            self.base.conn.new_event_queue::<XdgShellState>();
+            self.conn.new_event_queue::<XdgShellState>();
         let qh = event_queue.handle();
 
-        let compositor = match self.base.globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ()) {
+        let compositor = match self.globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ()) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!(
@@ -917,7 +907,6 @@ impl WayshotConnection {
 
         // Use XDG shell instead of layer shell
         let xdg_wm_base = match self
-            .base
             .globals
             .bind::<wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase, _, _>(
             &qh,
@@ -937,7 +926,6 @@ impl WayshotConnection {
         };
 
         let viewporter = self
-            .base
             .globals
             .bind::<WpViewporter, _, _>(&qh, 1..=1, ())
             .ok();
@@ -1224,7 +1212,7 @@ use wayland_client::{
 impl WayshotConnection {
     /// get all outputs and their info
     pub fn outputs(&self) -> &Vec<OutputInfo> {
-        &self.base.output_infos
+        &self.output_infos
     }
 
     pub(crate) fn take_event_queue(&mut self) -> EventQueue<Self> {
@@ -1280,11 +1268,11 @@ impl WayshotConnection {
     }
 
     pub fn connection(&self) -> &Connection {
-        &self.base.conn
+        &self.conn
     }
 
     pub fn globals(&self) -> &GlobalList {
-        &self.base.globals
+        &self.globals
     }
 
     pub fn ext_new() -> std::result::Result<Self, WayshotError> {
@@ -1304,11 +1292,9 @@ impl WayshotConnection {
 
         // Create a new state with the base fields
         let mut state = Self {
-            base: WayshotBase {
-                conn,
-                globals,
-                output_infos: Vec::new(),
-            },
+            conn,
+            globals,
+            output_infos: Vec::new(),
             dmabuf_state: None, // Initialize dmabuf_state as None
             ext_image: Some(HaruhiShotBase {
                 toplevels: Vec::new(),
@@ -1326,19 +1312,10 @@ impl WayshotConnection {
         let qh = event_queue.handle();
 
         // Now bind to globals after outputs are refreshed
-        let image_manager = state
-            .base
-            .globals
-            .bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
-        let output_image_manager = state
-            .base
-            .globals
-            .bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
-        let shm = state.base.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
-        state
-            .base
-            .globals
-            .bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
+        let image_manager = state.globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
+        let output_image_manager = state.globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
+        let shm = state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
+        state.globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
 
         // XDG output manager is already used in refresh_outputs, so we don't need to
         // create it again and iterate through outputs here

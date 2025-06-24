@@ -109,7 +109,7 @@ fn main() -> Result<()> {
 
     let output = cli.output.or(base.output);
 
-    let testing = true; // Set to true for testing purposes, can be removed later
+    let testing = false; // Set to true for testing purposes, can be removed later
     if testing {
         // Try to use ext_image_* protocol first
         if let Ok(mut state) = libwayshot::WayshotConnection::ext_new() {
@@ -165,8 +165,8 @@ fn main() -> Result<()> {
                 |w_conn| {
                     let info = libwaysip::get_area(
                         Some(libwaysip::WaysipConnection {
-                            connection: &w_conn.base.conn,
-                            globals: &w_conn.base.globals,
+                            connection: &w_conn.conn,
+                            globals: &w_conn.globals,
                         }),
                         libwaysip::SelectionType::Area,
                     )
