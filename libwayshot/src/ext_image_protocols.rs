@@ -577,7 +577,7 @@ impl HaruhiShotState {
         };
 
         // First refresh outputs to populate the output_infos
-        state.refresh_outputs(); //?;
+        state.refresh_outputs()?;
 
         let qh = event_queue.handle();
 
