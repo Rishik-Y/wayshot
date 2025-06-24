@@ -1,4 +1,4 @@
-use libwayshot::WayshotConnection_main;
+use libwayshot::WayshotConnection;
 use wayland_client::{
     Connection, Dispatch, QueueHandle, WEnum, delegate_noop,
     protocol::{
@@ -18,7 +18,7 @@ fn main() {
     let display = conn.display();
     display.get_registry(&qhandle, ());
     let wayshot =
-        WayshotConnection_main::from_connection_with_dmabuf(conn, "/dev/dri/renderD128").unwrap();
+        WayshotConnection::from_connection_with_dmabuf(conn, "/dev/dri/renderD128").unwrap();
 
     let mut state = State {
         wayshot,
@@ -37,7 +37,7 @@ fn main() {
 }
 
 struct State {
-    wayshot: WayshotConnection_main,
+    wayshot: WayshotConnection,
     running: bool,
     base_surface: Option<wl_surface::WlSurface>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,

@@ -1,11 +1,11 @@
 use crate::{
-	WayshotConnection_main,
+	WayshotConnection,
 	error::{Result, WayshotError},
 	output::OutputInfo,
 };
 use std::cmp;
 
-pub type FreezeCallback = Box<dyn Fn(&WayshotConnection_main) -> Result<LogicalRegion>>;
+pub type FreezeCallback = Box<dyn Fn(&WayshotConnection) -> Result<LogicalRegion>>;
 
 /// Ways to say how a region for a screenshot should be captured.
 pub enum RegionCapturer {

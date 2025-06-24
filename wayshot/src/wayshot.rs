@@ -109,7 +109,7 @@ fn main() -> Result<()> {
 
     let output = cli.output.or(base.output);
 
-    let testing = true; // Set to true for testing purposes, can be removed later
+    let testing = false; // Set to true for testing purposes, can be removed later
     if testing {
         // Try to use ext_image_* protocol first
         if let Ok(mut state) = libwayshot::WayshotConnection::ext_new() {
@@ -139,7 +139,7 @@ fn main() -> Result<()> {
         // Fallback to wlr_screencopy if ext_image_* protocol isn't available
         tracing::info!("ext_image protocol not available, falling back to wlr_screencopy");
 
-        let wayshot_conn = libwayshot::WayshotConnection_main::new()?;
+        let wayshot_conn = libwayshot::WayshotConnection::new()?;
 
         let stdout = io::stdout();
         let mut writer = BufWriter::new(stdout.lock());

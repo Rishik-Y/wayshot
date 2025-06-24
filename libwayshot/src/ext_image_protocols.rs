@@ -348,5 +348,3 @@ pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
 }
 
 use crate::WayshotConnection;
-
-use crate::WayshotConnection_main;

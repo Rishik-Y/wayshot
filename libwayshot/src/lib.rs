@@ -1,7 +1,7 @@
 //! `libwayshot` is a convenient wrapper over the wlroots screenshot protocol
 //! that provides a simple API to take screenshots with.
 //!
-//! To get started, look at [`WayshotConnection_main`].
+//! To get started, look at [`WayshotConnection`].
 
 mod convert;
 mod dispatch;
@@ -100,13 +100,13 @@ pub struct WayshotBase {
 }
 
 #[derive(Debug)]
-pub struct WayshotConnection_main {
+pub struct WayshotConnection {
     pub base: WayshotBase,
     dmabuf_state: Option<DMABUFState>,
     pub ext_image: Option<HaruhiShotBase<Self>>,
 }
 
-impl WayshotConnection_main {
+impl WayshotConnection {
     pub fn new() -> Result<
         Self, //, HaruhiError
     > {
@@ -297,7 +297,7 @@ impl WayshotConnection_main {
     }
     /// # Safety
     ///
-    /// Helper function/wrapper that uses the OpenGL extension OES_EGL_image to convert the EGLImage obtained from [`WayshotConnection_main::capture_output_frame_eglimage`]
+    /// Helper function/wrapper that uses the OpenGL extension OES_EGL_image to convert the EGLImage obtained from [`WayshotConnection::capture_output_frame_eglimage`]
     /// into a OpenGL texture.
     /// - The caller is supposed to setup everything required for the texture binding. An example call may look like:
     /// ```no_run, ignore
@@ -891,7 +891,7 @@ impl WayshotConnection_main {
         callback: F,
     ) -> Result<LogicalRegion>
     where
-        F: Fn(&WayshotConnection_main) -> Result<LogicalRegion, WayshotError>,
+        F: Fn(&WayshotConnection) -> Result<LogicalRegion, WayshotError>,
     {
         let mut state = XdgShellState::new();
         let mut event_queue: EventQueue<XdgShellState> =
@@ -1155,7 +1155,7 @@ impl WayshotConnection_main {
     /// unfreeze the screenshot and return the selected region.
     pub fn screenshot_freeze<F>(&self, callback: F, cursor_overlay: bool) -> Result<DynamicImage>
     where
-        F: Fn(&WayshotConnection_main) -> Result<LogicalRegion> + 'static,
+        F: Fn(&WayshotConnection) -> Result<LogicalRegion> + 'static,
     {
         self.screenshot_region_capturer(RegionCapturer::Freeze(Box::new(callback)), cursor_overlay)
     }
@@ -1222,14 +1222,6 @@ use wayland_client::{
 	ConnectError, DispatchError,
 	globals::{BindError, GlobalError},
 };
-
-/// This main state of HaruhiShot, We use it to do screen copy
-#[derive(Debug)]
-pub struct WayshotConnection {
-	pub base: WayshotBase, // Connection, globals and output info
-	dmabuf_state: Option<DMABUFState>,
-	pub ext_image: Option<HaruhiShotBase<Self>>,
-}
 
 impl WayshotConnection {
 	/// get all outputs and their info

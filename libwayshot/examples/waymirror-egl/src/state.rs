@@ -1,7 +1,7 @@
 use crate::error::{Result, WaylandEGLStateError};
 use crate::utils::load_shader;
 
-use libwayshot::WayshotConnection_main;
+use libwayshot::WayshotConnection;
 
 use gl::types::GLuint;
 use khronos_egl::{self as egl};
@@ -38,7 +38,7 @@ pub struct WaylandEGLState {
     pub xdg_toplevel: Option<xdg_toplevel::XdgToplevel>,
     pub wl_compositor: Option<wl_compositor::WlCompositor>,
 
-    wayshot: WayshotConnection_main,
+    wayshot: WayshotConnection,
 }
 
 impl WaylandEGLState {
@@ -68,7 +68,7 @@ impl WaylandEGLState {
             xdg_surface: None,
             xdg_toplevel: None,
             wl_compositor: None,
-            wayshot: WayshotConnection_main::from_connection_with_dmabuf(
+            wayshot: WayshotConnection::from_connection_with_dmabuf(
                 server_connection,
                 "/dev/dri/renderD128",
             )

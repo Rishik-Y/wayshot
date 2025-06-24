@@ -6,7 +6,7 @@ use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_v1::ZxdgOutputV
 
 /// Represents an accessible wayland output.
 ///
-/// Do not instantiate, instead use [`crate::WayshotConnection_main::get_all_outputs`].
+/// Do not instantiate, instead use [`crate::WayshotConnection::get_all_outputs`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OutputInfo {
     pub output: WlOutput,
