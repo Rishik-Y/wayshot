@@ -71,7 +71,6 @@ use wayland_client::{
 };
 
 use crate::dispatch::{DMABUFState, FrameState, OutputCaptureState, XdgShellState};
-use crate::error::HaruhiError;
 use crate::output::OutputInfo;
 use crate::region::{LogicalRegion, Position, Region, Size};
 use crate::{WayshotBase, WayshotError}; // Add this import
@@ -166,19 +165,19 @@ impl CaptureInfo {
 }
 
 pub trait AreaSelectCallback {
-    fn slurp(self, state: &HaruhiShotState) -> Result<Region, HaruhiError>;
+    fn slurp(self, state: &HaruhiShotState) -> Result<Region, WayshotError>;
 }
 
 impl<F> AreaSelectCallback for F
 where
-    F: Fn(&HaruhiShotState) -> Result<Region, HaruhiError>,
+    F: Fn(&HaruhiShotState) -> Result<Region, WayshotError>,
 {
-    fn slurp(self, state: &HaruhiShotState) -> Result<Region, HaruhiError> {
+    fn slurp(self, state: &HaruhiShotState) -> Result<Region, WayshotError> {
         self(state)
     }
 }
 impl AreaSelectCallback for Region {
-    fn slurp(self, _state: &HaruhiShotState) -> Result<Region, HaruhiError> {
+    fn slurp(self, _state: &HaruhiShotState) -> Result<Region, WayshotError> {
         Ok(self)
     }
 }
@@ -546,11 +545,11 @@ impl HaruhiShotState {
         &self.base.globals
     }
 
-    pub fn new() -> Result<Self, HaruhiError> {
+    pub fn new() -> Result<Self, WayshotError> {
         Self::from_ext_connection(None)
     }
 
-    fn from_ext_connection(connection: Option<Connection>) -> Result<Self, HaruhiError> {
+    fn from_ext_connection(connection: Option<Connection>) -> Result<Self, WayshotError> {
         let conn = if let Some(conn) = connection {
             conn
         } else {
@@ -678,7 +677,7 @@ impl HaruhiShotState {
         &mut self,
         option: CaptureOption,
         output: OutputInfo,
-    ) -> Result<ImageViewInfo, HaruhiError> {
+    ) -> Result<ImageViewInfo, WayshotError> {
         let mem_fd = ext_create_shm_fd().unwrap();
         let mem_file = File::from(mem_fd);
         let CaptureOutputData {
@@ -737,7 +736,7 @@ impl HaruhiShotState {
         option: CaptureOption,
         fd: T,
         file: Option<&File>,
-    ) -> Result<CaptureOutputData, HaruhiError> {
+    ) -> Result<CaptureOutputData, WayshotError> {
         let mut event_queue = self.take_event_queue();
         let img_manager = self.output_image_manager();
         let capture_manager = self.image_copy_capture_manager();
@@ -757,7 +756,7 @@ impl HaruhiShotState {
 
         let Size { width, height } = info.size();
         let WEnum::Value(frame_format) = info.format() else {
-            return Err(HaruhiError::NotSupportFormat);
+            return Err(WayshotError::NotSupportFormat);
         };
         if !matches!(
             frame_format,
@@ -767,7 +766,7 @@ impl HaruhiShotState {
                 | Format::Xrgb8888
                 | Format::Xbgr8888
         ) {
-            return Err(HaruhiError::NotSupportFormat);
+            return Err(WayshotError::NotSupportFormat);
         }
         let frame_bytes = 4 * height * width;
         let mem_fd = fd.as_fd();
@@ -803,23 +802,23 @@ impl HaruhiShotState {
                 FrameState::Failed(info) => match info {
                     Some(WEnum::Value(reason)) => match reason {
                         FailureReason::Stopped => {
-                            return Err(HaruhiError::CaptureFailed("Stopped".to_owned()));
+                            return Err(WayshotError::CaptureFailed("Stopped".to_owned()));
                         }
 
                         FailureReason::BufferConstraints => {
-                            return Err(HaruhiError::CaptureFailed("BufferConstraints".to_owned()));
+                            return Err(WayshotError::CaptureFailed("BufferConstraints".to_owned()));
                         }
                         FailureReason::Unknown | _ => {
-                            return Err(HaruhiError::CaptureFailed("Unknown".to_owned()));
+                            return Err(WayshotError::CaptureFailed("Unknown".to_owned()));
                         }
                     },
                     Some(WEnum::Unknown(code)) => {
-                        return Err(HaruhiError::CaptureFailed(format!(
+                        return Err(WayshotError::CaptureFailed(format!(
                             "Unknown reason, code : {code}"
                         )));
                     }
                     None => {
-                        return Err(HaruhiError::CaptureFailed(
+                        return Err(WayshotError::CaptureFailed(
                             "No failure reason provided".to_owned(),
                         ));
                     }
@@ -849,7 +848,7 @@ impl HaruhiShotState {
         &mut self,
         option: CaptureOption,
         callback: F,
-    ) -> Result<ImageViewInfo, HaruhiError>
+    ) -> Result<ImageViewInfo, WayshotError>
     where
         F: AreaSelectCallback,
     {
@@ -930,7 +929,7 @@ impl HaruhiShotState {
         let shotdata = data_list
             .iter()
             .find(|data| data.in_this_screen(region))
-            .ok_or(HaruhiError::CaptureFailed("not in region".to_owned()))?;
+            .ok_or(WayshotError::CaptureFailed("not in region".to_owned()))?;
         let area = shotdata.clip_area(region).expect("should have");
         let mut frame_mmap = unsafe { MmapMut::map_mut(&shotdata.mem_file).unwrap() };
 

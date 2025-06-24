@@ -67,7 +67,6 @@ pub mod reexport {
     use wayland_client::protocol::wl_output;
     pub use wl_output::{Transform, WlOutput};
 }
-use crate::error::HaruhiError;
 use crate::ext_image_protocols::HaruhiShotBase;
 use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 
@@ -763,13 +762,13 @@ impl WayshotConnection {
         // Instantiate shm global.
         let shm = self.base.globals.bind::<WlShm, _, _>(&qh, 1..=1, ())?;
         let shm_pool = shm.create_pool(
-            fd.as_fd(),
-            frame_format
+			fd.as_fd(),
+			frame_format
                 .byte_size()
                 .try_into()
                 .map_err(|_| WayshotError::BufferTooSmall)?,
-            &qh,
-            (),
+			&qh,
+			(),
         );
         let buffer = shm_pool.create_buffer(
             0,

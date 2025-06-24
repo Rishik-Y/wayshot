@@ -4,6 +4,7 @@ use std::{env, fs, path::PathBuf};
 use dialoguer::FuzzySelect;
 use dialoguer::theme::ColorfulTheme;
 use libwayshot::ext_image_protocols::HaruhiShotState;
+use crate::utils::waysip_to_region;
 
 const TMP: &str = "/tmp";
 
@@ -33,7 +34,7 @@ pub enum WayshotImageWriteError {
     #[error("Output not exist")]
     OutputNotExist,
     #[error("Wayland shot error")]
-    WaylandError(#[from] libwayshot::error::HaruhiError),
+    WaylandError(#[from] libwayshot::error::WayshotError),
 }
 
 pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>) {
@@ -202,11 +203,11 @@ pub fn ext_capture_area(
             }),
             libwaysip::SelectionType::Area,
         )
-        .map_err(|e| libwayshot::error::HaruhiError::CaptureFailed(e.to_string()))?
-        .ok_or(libwayshot::error::HaruhiError::CaptureFailed(
+        .map_err(|e| libwayshot::error::WayshotError::CaptureFailed(e.to_string()))?
+        .ok_or(libwayshot::error::WayshotError::CaptureFailed(
             "Failed to capture the area".to_string(),
         ))?;
-        waysip_to_region(info.size(), info.left_top_point())
+        waysip_to_region2(info.size(), info.left_top_point())
     })?;
 
     let mut buff = std::io::Cursor::new(Vec::new());
@@ -230,10 +231,10 @@ pub fn ext_capture_area(
     }
 }
 
-pub fn waysip_to_region(
+pub fn waysip_to_region2(
     size: libwaysip::Size,
     point: libwaysip::Position,
-) -> Result<Region, libwayshot::error::HaruhiError> {
+) -> Result<Region, libwayshot::error::WayshotError> {
     let size: Size = Size {
         width: size.width as u32,
         height: size.height as u32,
@@ -267,11 +268,11 @@ pub fn ext_capture_color(
             }),
             libwaysip::SelectionType::Point,
         )
-        .map_err(|e| libwayshot::error::HaruhiError::CaptureFailed(e.to_string()))?
-        .ok_or(libwayshot::error::HaruhiError::CaptureFailed(
+        .map_err(|e| libwayshot::error::WayshotError::CaptureFailed(e.to_string()))?
+        .ok_or(libwayshot::error::WayshotError::CaptureFailed(
             "Failed to capture the area".to_string(),
         ))?;
-        waysip_to_region(info.size(), info.left_top_point())
+        waysip_to_region2(info.size(), info.left_top_point())
     })?;
 
     let mut buff = std::io::Cursor::new(Vec::new());

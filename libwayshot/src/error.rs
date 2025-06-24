@@ -45,22 +45,8 @@ pub enum WayshotError {
     EGLError(#[from] khronos_egl::Error),
     #[error("No EGLImageTargetTexture2DOES function located, this extension may not be supported")]
     EGLImageToTexProcNotFoundError,
-}
-/// This describe the error happens during screenshot
-#[derive(Error, Debug)]
-pub enum HaruhiError {
-    #[error("Init Failed connection")]
-	Connect(#[from] ConnectError),
-    #[error("Init Failed Global")]
-	Global(#[from] GlobalError),
-    #[error("Dispatch Error")]
-	Dispatch(#[from] DispatchError),
-    #[error("Error during queue")]
-	Bind(#[from] BindError),
-    #[error("Error in write image in shm")]
-	Io(#[from] io::Error),
-    #[error("Not Support format")]
-    NotSupportFormat,
-    #[error("Capture Failed")]
-    CaptureFailed(String),
+	#[error("Not Support format")]
+	NotSupportFormat,
+	#[error("Capture Failed")]
+	CaptureFailed(String),
 }
