@@ -112,7 +112,7 @@ fn main() -> Result<()> {
     let testing = true; // Set to true for testing purposes, can be removed later
     if testing {
         // Try to use ext_image_* protocol first
-        if let Ok(mut state) = libwayshot::WayshotConnection::new() {
+        if let Ok(mut state) = libwayshot::WayshotConnection::ext_new() {
             // Using ext_image_* protocol
             if cli.list_outputs {
                 let outputs = state.outputs();

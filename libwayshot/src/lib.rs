@@ -1297,7 +1297,7 @@ impl WayshotConnection {
 		&self.base.globals
 	}
 
-	pub fn new() -> std::result::Result<Self, WayshotError> {
+	pub fn ext_new() -> std::result::Result<Self, WayshotError> {
 		Self::from_ext_connection(None)
 	}
 
