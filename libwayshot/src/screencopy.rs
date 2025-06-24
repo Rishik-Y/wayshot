@@ -16,8 +16,8 @@ use wayland_client::protocol::{
 };
 
 use crate::{
-	WayshotError, Result,
-	region::{LogicalRegion, Size},
+    Result, WayshotError,
+    region::{LogicalRegion, Size},
 };
 
 pub struct FrameGuard {

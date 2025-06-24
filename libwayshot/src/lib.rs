@@ -61,7 +61,7 @@ use crate::{
     screencopy::{FrameCopy, FrameFormat, create_shm_fd},
 };
 
-pub use crate::error::{WayshotError, Result};
+pub use crate::error::{Result, WayshotError};
 
 pub mod reexport {
     use wayland_client::protocol::wl_output;
@@ -160,62 +160,62 @@ impl WayshotConnection {
         Ok(initial_state)
     }
 
-	/// refresh the outputs, to get new outputs
-	pub fn refresh_outputs(&mut self) -> Result<()> {
-		// Connecting to wayland environment.
-		let mut state = OutputCaptureState {
-			outputs: Vec::new(),
-		};
-		let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
-		let qh = event_queue.handle();
+    /// refresh the outputs, to get new outputs
+    pub fn refresh_outputs(&mut self) -> Result<()> {
+        // Connecting to wayland environment.
+        let mut state = OutputCaptureState {
+            outputs: Vec::new(),
+        };
+        let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
+        let qh = event_queue.handle();
 
-		// Bind to xdg_output global.
-		let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
-			&qh,
-			3..=3,
-			(),
-		) {
-			Ok(x) => x,
-			Err(e) => {
-				tracing::error!(
+        // Bind to xdg_output global.
+        let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
+            &qh,
+            3..=3,
+            (),
+        ) {
+            Ok(x) => x,
+            Err(e) => {
+                tracing::error!(
                     "Failed to create ZxdgOutputManagerV1 version 3. Does your compositor implement ZxdgOutputManagerV1?"
                 );
-				panic!("{:#?}", e);
-			}
-		};
+                panic!("{:#?}", e);
+            }
+        };
 
-		// Fetch all outputs; when their names arrive, add them to the list
-		let _ = self.base.conn.display().get_registry(&qh, ());
-		event_queue.roundtrip(&mut state)?;
+        // Fetch all outputs; when their names arrive, add them to the list
+        let _ = self.base.conn.display().get_registry(&qh, ());
+        event_queue.roundtrip(&mut state)?;
 
-		// We loop over each output and request its position data.
-		// Also store the xdg_output reference in the OutputInfo
-		let xdg_outputs: Vec<ZxdgOutputV1> = state
-			.outputs
-			.iter_mut()
-			.enumerate()
-			.map(|(index, output)| {
-				let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
-				output.xdg_output = Some(xdg_output.clone());
-				xdg_output
-			})
-			.collect();
+        // We loop over each output and request its position data.
+        // Also store the xdg_output reference in the OutputInfo
+        let xdg_outputs: Vec<ZxdgOutputV1> = state
+            .outputs
+            .iter_mut()
+            .enumerate()
+            .map(|(index, output)| {
+                let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
+                output.xdg_output = Some(xdg_output.clone());
+                xdg_output
+            })
+            .collect();
 
-		event_queue.roundtrip(&mut state)?;
+        event_queue.roundtrip(&mut state)?;
 
-		for xdg_output in xdg_outputs {
-			xdg_output.destroy();
-		}
+        for xdg_output in xdg_outputs {
+            xdg_output.destroy();
+        }
 
-		if state.outputs.is_empty() {
-			tracing::error!("Compositor did not advertise any wl_output devices!");
-			return Err(WayshotError::NoOutputs);
-		}
-		tracing::trace!("Outputs detected: {:#?}", state.outputs);
-		self.base.output_infos = state.outputs;
+        if state.outputs.is_empty() {
+            tracing::error!("Compositor did not advertise any wl_output devices!");
+            return Err(WayshotError::NoOutputs);
+        }
+        tracing::trace!("Outputs detected: {:#?}", state.outputs);
+        self.base.output_infos = state.outputs;
 
-		Ok(())
-	}
+        Ok(())
+    }
 
     /// Fetch all accessible wayland outputs.
     pub fn get_all_outputs(&self) -> &[OutputInfo] {
@@ -763,13 +763,13 @@ impl WayshotConnection {
         // Instantiate shm global.
         let shm = self.base.globals.bind::<WlShm, _, _>(&qh, 1..=1, ())?;
         let shm_pool = shm.create_pool(
-			fd.as_fd(),
-			frame_format
+            fd.as_fd(),
+            frame_format
                 .byte_size()
                 .try_into()
                 .map_err(|_| WayshotError::BufferTooSmall)?,
-			&qh,
-			(),
+            &qh,
+            (),
         );
         let buffer = shm_pool.create_buffer(
             0,
@@ -918,7 +918,9 @@ impl WayshotConnection {
                     "Failed to create xdg_wm_base. Does your compositor implement XdgWmBase?"
                 );
                 tracing::error!("err: {e}");
-                return Err(WayshotError::ProtocolNotFound("XdgWmBase not found".to_string()));
+                return Err(WayshotError::ProtocolNotFound(
+                    "XdgWmBase not found".to_string(),
+                ));
             }
         };
 

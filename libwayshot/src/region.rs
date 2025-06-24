@@ -1,7 +1,7 @@
 use crate::{
-	WayshotConnection,
-	error::{WayshotError, Result},
-	output::OutputInfo,
+    WayshotConnection,
+    error::{Result, WayshotError},
+    output::OutputInfo,
 };
 use std::cmp;
 
