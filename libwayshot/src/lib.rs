@@ -6,11 +6,11 @@
 mod convert;
 mod dispatch;
 pub mod error;
+pub mod ext_image_protocols;
 mod image_util;
 pub mod output;
 pub mod region;
 mod screencopy;
-pub mod ext_image_protocols;
 
 use std::{
     collections::HashSet,
@@ -48,11 +48,9 @@ use wayland_protocols::{
         zxdg_output_manager_v1::ZxdgOutputManagerV1, zxdg_output_v1::ZxdgOutputV1,
     },
 };
-use wayland_protocols_wlr::{
-    screencopy::v1::client::{
-        zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
-        zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
-    },
+use wayland_protocols_wlr::screencopy::v1::client::{
+    zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
+    zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
 use crate::{
@@ -63,14 +61,15 @@ use crate::{
     screencopy::{FrameCopy, FrameFormat, create_shm_fd},
 };
 
-pub use crate::error::{Error, Result};
+pub use crate::error::{WayshotError, Result};
 
 pub mod reexport {
     use wayland_client::protocol::wl_output;
     pub use wl_output::{Transform, WlOutput};
 }
-use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
+use crate::error::HaruhiError;
 use crate::ext_image_protocols::HaruhiShotBase;
+use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 
 /// Struct to store wayland connection and globals list.
 /// # Example usage
@@ -96,15 +95,24 @@ pub struct WayshotConnection {
 }
 
 impl WayshotConnection {
-    pub fn new() -> Result<Self> {
-        let conn = Connection::connect_to_env()?;
+    pub fn new() -> Result<
+        Self, //, HaruhiError
+    > {
+        Self::from_connection(None)
+    }
 
-        Self::from_connection(conn)
+    pub fn new2() -> Result<Self> {
+        Self::from_connection(None)
     }
 
     /// Recommended if you already have a [`wayland_client::Connection`].
-    pub fn from_connection(conn: Connection) -> Result<Self> {
-        let (globals, _) = registry_queue_init::<WayshotState>(&conn)?;
+    pub fn from_connection(connection: Option<Connection>) -> Result<Self> {
+        let conn = if let Some(conn) = connection {
+            conn
+        } else {
+            Connection::connect_to_env()?
+        };
+        let (globals, mut event_queue) = registry_queue_init::<WayshotState>(&conn)?;
 
         let base = WayshotBase {
             conn,
@@ -152,6 +160,63 @@ impl WayshotConnection {
         Ok(initial_state)
     }
 
+	/// refresh the outputs, to get new outputs
+	pub fn refresh_outputs(&mut self) -> Result<()> {
+		// Connecting to wayland environment.
+		let mut state = OutputCaptureState {
+			outputs: Vec::new(),
+		};
+		let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
+		let qh = event_queue.handle();
+
+		// Bind to xdg_output global.
+		let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
+			&qh,
+			3..=3,
+			(),
+		) {
+			Ok(x) => x,
+			Err(e) => {
+				tracing::error!(
+                    "Failed to create ZxdgOutputManagerV1 version 3. Does your compositor implement ZxdgOutputManagerV1?"
+                );
+				panic!("{:#?}", e);
+			}
+		};
+
+		// Fetch all outputs; when their names arrive, add them to the list
+		let _ = self.base.conn.display().get_registry(&qh, ());
+		event_queue.roundtrip(&mut state)?;
+
+		// We loop over each output and request its position data.
+		// Also store the xdg_output reference in the OutputInfo
+		let xdg_outputs: Vec<ZxdgOutputV1> = state
+			.outputs
+			.iter_mut()
+			.enumerate()
+			.map(|(index, output)| {
+				let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
+				output.xdg_output = Some(xdg_output.clone());
+				xdg_output
+			})
+			.collect();
+
+		event_queue.roundtrip(&mut state)?;
+
+		for xdg_output in xdg_outputs {
+			xdg_output.destroy();
+		}
+
+		if state.outputs.is_empty() {
+			tracing::error!("Compositor did not advertise any wl_output devices!");
+			return Err(WayshotError::NoOutputs);
+		}
+		tracing::trace!("Outputs detected: {:#?}", state.outputs);
+		self.base.output_infos = state.outputs;
+
+		Ok(())
+	}
+
     /// Fetch all accessible wayland outputs.
     pub fn get_all_outputs(&self) -> &[OutputInfo] {
         self.base.output_infos.as_slice()
@@ -186,63 +251,6 @@ impl WayshotConnection {
             println!("    Position: {x}, {y}");
             // println!("    Scale: {scale}");
         }
-    }
-
-    /// refresh the outputs, to get new outputs
-    pub fn refresh_outputs(&mut self) -> Result<()> {
-        // Connecting to wayland environment.
-        let mut state = OutputCaptureState {
-            outputs: Vec::new(),
-        };
-        let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
-        let qh = event_queue.handle();
-
-        // Bind to xdg_output global.
-        let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
-            &qh,
-            3..=3,
-            (),
-        ) {
-            Ok(x) => x,
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create ZxdgOutputManagerV1 version 3. Does your compositor implement ZxdgOutputManagerV1?"
-                );
-                panic!("{:#?}", e);
-            }
-        };
-
-        // Fetch all outputs; when their names arrive, add them to the list
-        let _ = self.base.conn.display().get_registry(&qh, ());
-        event_queue.roundtrip(&mut state)?;
-
-        // We loop over each output and request its position data.
-        // Also store the xdg_output reference in the OutputInfo
-        let xdg_outputs: Vec<ZxdgOutputV1> = state
-            .outputs
-            .iter_mut()
-            .enumerate()
-            .map(|(index, output)| {
-                let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
-                output.xdg_output = Some(xdg_output.clone());
-                xdg_output
-            })
-            .collect();
-
-        event_queue.roundtrip(&mut state)?;
-
-        for xdg_output in xdg_outputs {
-            xdg_output.destroy();
-        }
-
-        if state.outputs.is_empty() {
-            tracing::error!("Compositor did not advertise any wl_output devices!");
-            return Err(Error::NoOutputs);
-        }
-        tracing::trace!("Outputs detected: {:#?}", state.outputs);
-        self.base.output_infos = state.outputs;
-
-        Ok(())
     }
 
     /// Get a FrameCopy instance with screenshot pixel data for any wl_output object.
@@ -300,7 +308,7 @@ impl WayshotConnection {
     /// # Returns
     /// - If the function was found and called, an OK(()), note that this does not necessarily mean that binding was successful, only that the function was called.
     ///   The caller may check for any OpenGL errors using the standard routes.
-    /// - If the function was not found, [`Error::EGLImageToTexProcNotFoundError`] is returned
+    /// - If the function was not found, [`WayshotError::EGLImageToTexProcNotFoundError`] is returned
     pub unsafe fn bind_output_frame_to_gl_texture(
         &self,
         cursor_overlay: bool,
@@ -322,7 +330,7 @@ impl WayshotConnection {
                     }
                     None => {
                         tracing::error!("glEGLImageTargetTexture2DOES not found");
-                        return Err(Error::EGLImageToTexProcNotFoundError);
+                        return Err(WayshotError::EGLImageToTexProcNotFoundError);
                     }
                 });
 
@@ -496,7 +504,7 @@ impl WayshotConnection {
 
                 Ok((frame_format, frame_guard, bo))
             }
-            None => Err(Error::NoDMAStateError),
+            None => Err(WayshotError::NoDMAStateError),
         }
     }
 
@@ -537,7 +545,7 @@ impl WayshotConnection {
                     "Failed to create screencopy manager. Does your compositor implement ZwlrScreencopy?"
                 );
                 tracing::error!("err: {e}");
-                return Err(Error::ProtocolNotFound(
+                return Err(WayshotError::ProtocolNotFound(
                     "ZwlrScreencopy Manager not found".to_string(),
                 ));
             }
@@ -588,7 +596,7 @@ impl WayshotConnection {
             // Check if frame format exists.
             .ok_or_else(|| {
                 tracing::error!("No suitable frame format found");
-                Error::NoSupportedBufferFormat
+                WayshotError::NoSupportedBufferFormat
             })?;
         tracing::trace!("Selected frame buffer format: {:#?}", frame_format);
 
@@ -627,7 +635,7 @@ impl WayshotConnection {
                     "Failed to create screencopy manager. Does your compositor implement ZwlrScreencopy?"
                 );
                 tracing::error!("err: {e}");
-                return Err(Error::ProtocolNotFound(
+                return Err(WayshotError::ProtocolNotFound(
                     "ZwlrScreencopy Manager not found".to_string(),
                 ));
             }
@@ -718,7 +726,7 @@ impl WayshotConnection {
                         match state {
                             FrameState::Failed(_) => {
                                 tracing::error!("Frame copy failed");
-                                return Err(Error::FramecopyFailed);
+                                return Err(WayshotError::FramecopyFailed);
                             }
                             FrameState::Succeeded => {
                                 tracing::trace!("Frame copy finished");
@@ -736,7 +744,7 @@ impl WayshotConnection {
                     event_queue.blocking_dispatch(&mut state)?;
                 }
             }
-            None => Err(Error::NoDMAStateError),
+            None => Err(WayshotError::NoDMAStateError),
         }
     }
 
@@ -755,13 +763,13 @@ impl WayshotConnection {
         // Instantiate shm global.
         let shm = self.base.globals.bind::<WlShm, _, _>(&qh, 1..=1, ())?;
         let shm_pool = shm.create_pool(
-            fd.as_fd(),
-            frame_format
+			fd.as_fd(),
+			frame_format
                 .byte_size()
                 .try_into()
-                .map_err(|_| Error::BufferTooSmall)?,
-            &qh,
-            (),
+                .map_err(|_| WayshotError::BufferTooSmall)?,
+			&qh,
+			(),
         );
         let buffer = shm_pool.create_buffer(
             0,
@@ -782,7 +790,7 @@ impl WayshotConnection {
                 match state {
                     FrameState::Failed(_) => {
                         tracing::error!("Frame copy failed");
-                        return Err(Error::FramecopyFailed);
+                        return Err(WayshotError::FramecopyFailed);
                     }
                     FrameState::Succeeded => {
                         tracing::trace!("Frame copy finished");
@@ -827,7 +835,7 @@ impl WayshotConnection {
                 tracing::error!(
                     "You can send a feature request for the above format to the mailing list for wayshot over at https://sr.ht/~shinyzenith/wayshot."
                 );
-                return Err(Error::NoSupportedBufferFormat);
+                return Err(WayshotError::NoSupportedBufferFormat);
             }
         };
         let rotated_physical_size = match output_info.transform {
@@ -875,7 +883,7 @@ impl WayshotConnection {
         callback: F,
     ) -> Result<LogicalRegion>
     where
-        F: Fn(&WayshotConnection) -> Result<LogicalRegion, Error>,
+        F: Fn(&WayshotConnection) -> Result<LogicalRegion, WayshotError>,
     {
         let mut state = XdgShellState::new();
         let mut event_queue: EventQueue<XdgShellState> =
@@ -889,27 +897,36 @@ impl WayshotConnection {
                     "Failed to create compositor. Does your compositor implement WlCompositor?"
                 );
                 tracing::error!("err: {e}");
-                return Err(Error::ProtocolNotFound(
+                return Err(WayshotError::ProtocolNotFound(
                     "WlCompositor not found".to_string(),
                 ));
             }
         };
 
         // Use XDG shell instead of layer shell
-        let xdg_wm_base = match self.base.globals.bind::<wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase, _, _>(&qh, 1..=1, ()) {
+        let xdg_wm_base = match self
+            .base
+            .globals
+            .bind::<wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase, _, _>(
+            &qh,
+            1..=1,
+            (),
+        ) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!(
                     "Failed to create xdg_wm_base. Does your compositor implement XdgWmBase?"
                 );
                 tracing::error!("err: {e}");
-                return Err(Error::ProtocolNotFound(
-                    "XdgWmBase not found".to_string(),
-                ));
+                return Err(WayshotError::ProtocolNotFound("XdgWmBase not found".to_string()));
             }
         };
 
-        let viewporter = self.base.globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
+        let viewporter = self
+            .base
+            .globals
+            .bind::<WpViewporter, _, _>(&qh, 1..=1, ())
+            .ok();
         if viewporter.is_none() {
             tracing::info!(
                 "Compositor does not support wp_viewporter, display scaling may be inaccurate."
@@ -929,7 +946,8 @@ impl WayshotConnection {
                 let surface = compositor.create_surface(&qh, ());
 
                 // Create XDG surface and toplevel instead of layer shell surface
-                let xdg_surface = xdg_wm_base.get_xdg_surface(&surface, &qh, output_info.output.clone());
+                let xdg_surface =
+                    xdg_wm_base.get_xdg_surface(&surface, &qh, output_info.output.clone());
                 let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
 
                 // Configure the toplevel to be fullscreen on the specific output
@@ -1109,7 +1127,7 @@ impl WayshotConnection {
                 )
                 .ok_or_else(|| {
                     tracing::error!("Provided capture region doesn't intersect with any outputs!");
-                    Error::NoOutputs
+                    WayshotError::NoOutputs
                 })?
         })
     }
@@ -1149,7 +1167,7 @@ impl WayshotConnection {
         cursor_overlay: bool,
     ) -> Result<DynamicImage> {
         if outputs.is_empty() {
-            return Err(Error::NoOutputs);
+            return Err(WayshotError::NoOutputs);
         }
 
         self.screenshot_region_capturer(RegionCapturer::Outputs(outputs.to_owned()), cursor_overlay)
