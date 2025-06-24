@@ -3,15 +3,21 @@ use std::{
     os::fd::{AsFd, BorrowedFd},
     sync::atomic::{AtomicBool, Ordering},
 };
-use wayland_client::{Connection, Dispatch, QueueHandle, WEnum::{self, Value}, delegate_noop, globals::GlobalListContents, protocol::{
-	wl_buffer::WlBuffer,
-	wl_compositor::WlCompositor,
-	wl_output::{self, WlOutput},
-	wl_registry::{self, WlRegistry},
-	wl_shm::WlShm,
-	wl_shm_pool::WlShmPool,
-	wl_surface::WlSurface,
-}, Proxy};
+use wayland_client::{
+    Connection, Dispatch, Proxy, QueueHandle,
+    WEnum::{self, Value},
+    delegate_noop,
+    globals::GlobalListContents,
+    protocol::{
+        wl_buffer::WlBuffer,
+        wl_compositor::WlCompositor,
+        wl_output::{self, WlOutput},
+        wl_registry::{self, WlRegistry},
+        wl_shm::WlShm,
+        wl_shm_pool::WlShmPool,
+        wl_surface::WlSurface,
+    },
+};
 use wayland_protocols::{
     ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason,
     wp::{
@@ -327,22 +333,22 @@ pub(crate) struct DMABUFState {
 
 // Replace the layer shell imports with xdg_shell imports
 use wayland_protocols::xdg::shell::client::{
-	xdg_surface::{self, XdgSurface},
-	xdg_toplevel::{self, XdgToplevel},
-	xdg_wm_base::{self, XdgWmBase},
+    xdg_surface::{self, XdgSurface},
+    xdg_toplevel::{self, XdgToplevel},
+    xdg_wm_base::{self, XdgWmBase},
 };
 
 #[derive(Debug)]
 pub(crate) struct XdgShellState {
-	pub configured_surfaces: HashSet<XdgSurface>,
+    pub configured_surfaces: HashSet<XdgSurface>,
 }
 
 impl XdgShellState {
-	pub(crate) fn new() -> Self {
-		Self {
-			configured_surfaces: HashSet::new(),
-		}
-	}
+    pub(crate) fn new() -> Self {
+        Self {
+            configured_surfaces: HashSet::new(),
+        }
+    }
 }
 
 // Replace the LayerShellState dispatch implementations with XdgShell ones
@@ -356,41 +362,41 @@ delegate_noop!(XdgShellState: ignore WpViewporter);
 delegate_noop!(XdgShellState: ignore XdgToplevel);
 
 impl Dispatch<XdgSurface, WlOutput> for XdgShellState {
-	fn event(
-		state: &mut Self,
-		proxy: &XdgSurface,
-		event: <XdgSurface as Proxy>::Event,
-		_data: &WlOutput,
-		_conn: &Connection,
-		_qhandle: &QueueHandle<Self>,
-	) {
-		match event {
-			xdg_surface::Event::Configure { serial } => {
-				tracing::debug!("Acking XDG surface configure");
-				state.configured_surfaces.insert(proxy.clone());
-				proxy.ack_configure(serial);
-				tracing::trace!("Acked XDG surface configure");
-			}
-			_ => {}
-		}
-	}
+    fn event(
+        state: &mut Self,
+        proxy: &XdgSurface,
+        event: <XdgSurface as Proxy>::Event,
+        _data: &WlOutput,
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        match event {
+            xdg_surface::Event::Configure { serial } => {
+                tracing::debug!("Acking XDG surface configure");
+                state.configured_surfaces.insert(proxy.clone());
+                proxy.ack_configure(serial);
+                tracing::trace!("Acked XDG surface configure");
+            }
+            _ => {}
+        }
+    }
 }
 
 // Add XdgWmBase ping handling
 impl Dispatch<XdgWmBase, ()> for XdgShellState {
-	fn event(
-		_state: &mut Self,
-		proxy: &XdgWmBase,
-		event: <XdgWmBase as Proxy>::Event,
-		_data: &(),
-		_conn: &Connection,
-		_qhandle: &QueueHandle<Self>,
-	) {
-		match event {
-			xdg_wm_base::Event::Ping { serial } => {
-				proxy.pong(serial);
-			}
-			_ => {}
-		}
-	}
+    fn event(
+        _state: &mut Self,
+        proxy: &XdgWmBase,
+        event: <XdgWmBase as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        match event {
+            xdg_wm_base::Event::Ping { serial } => {
+                proxy.pong(serial);
+            }
+            _ => {}
+        }
+    }
 }

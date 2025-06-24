@@ -12,10 +12,10 @@ pub struct OutputInfo {
     pub output: WlOutput,
     pub name: String,
     pub description: String,
-	pub transform: wl_output::Transform,
-	pub physical_size: Size,
+    pub transform: wl_output::Transform,
+    pub physical_size: Size,
     pub logical_region: LogicalRegion,
-	pub xdg_output: Option<ZxdgOutputV1>,
+    pub xdg_output: Option<ZxdgOutputV1>,
     pub scale: i32,
 }
 
@@ -31,21 +31,21 @@ impl Display for OutputInfo {
 }
 
 impl OutputInfo {
-	/// The name of the output or maybe the screen?
-	pub fn name(&self) -> &str {
-		&self.name
-	}
+    /// The name of the output or maybe the screen?
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 
-	pub(crate) fn new(output: WlOutput) -> Self {
-		Self {
-			output,
-			logical_region: LogicalRegion::default(),
-			physical_size: Size::default(),
-			name: "".to_owned(),
-			description: "".to_owned(),
-			xdg_output: None,
-			transform: wl_output::Transform::Normal,
-			scale: 1,
-		}
-	}
+    pub(crate) fn new(output: WlOutput) -> Self {
+        Self {
+            output,
+            logical_region: LogicalRegion::default(),
+            physical_size: Size::default(),
+            name: "".to_owned(),
+            description: "".to_owned(),
+            xdg_output: None,
+            transform: wl_output::Transform::Normal,
+            scale: 1,
+        }
+    }
 }

@@ -7,8 +7,8 @@ use libwayshot::ext_image_protocols::HaruhiShotState;
 
 const TMP: &str = "/tmp";
 
-use libwayshot::ext_image_protocols::ImageViewInfo;
 use libwayshot::ext_image_protocols::CaptureOption;
+use libwayshot::ext_image_protocols::ImageViewInfo;
 use libwayshot::region::{Position, Region, Size};
 
 #[derive(Debug, Clone)]

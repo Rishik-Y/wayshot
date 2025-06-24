@@ -7,10 +7,10 @@ use wayland_client::{
     globals::{BindError, GlobalError},
 };
 
-pub type Result<T, E = Error> = result::Result<T, E>;
+pub type Result<T, E = WayshotError> = result::Result<T, E>;
 
 #[derive(Error, Debug)]
-pub enum Error {
+pub enum WayshotError {
     #[error("no outputs supplied")]
     NoOutputs,
     #[error("image buffer is not big enough")]
@@ -50,18 +50,18 @@ pub enum Error {
 /// This describe the error happens during screenshot
 #[derive(Error, Debug)]
 pub enum HaruhiError {
-	#[error("Init Failed connection")]
-	InitFailedConnection(#[from] ConnectError),
-	#[error("Init Failed Global")]
-	InitFailedGlobal(#[from] GlobalError),
-	#[error("Dispatch Error")]
-	DispatchError(#[from] DispatchError),
-	#[error("Error during queue")]
-	BindError(#[from] BindError),
-	#[error("Error in write image in shm")]
-	ShmError(#[from] io::Error),
-	#[error("Not Support format")]
-	NotSupportFormat,
-	#[error("Capture Failed")]
-	CaptureFailed(String),
+    #[error("Init Failed connection")]
+    InitFailedConnection(#[from] ConnectError),
+    #[error("Init Failed Global")]
+    InitFailedGlobal(#[from] GlobalError),
+    #[error("Dispatch Error")]
+    DispatchError(#[from] DispatchError),
+    #[error("Error during queue")]
+    BindError(#[from] BindError),
+    #[error("Error in write image in shm")]
+    ShmError(#[from] io::Error),
+    #[error("Not Support format")]
+    NotSupportFormat,
+    #[error("Capture Failed")]
+    CaptureFailed(String),
 }

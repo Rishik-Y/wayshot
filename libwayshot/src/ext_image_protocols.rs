@@ -41,9 +41,9 @@ use std::sync::{Arc, RwLock};
 
 // Replace the layer shell imports with xdg_shell imports
 use wayland_protocols::xdg::shell::client::{
-	xdg_surface::{self, XdgSurface},
-	xdg_toplevel::{self, XdgToplevel},
-	xdg_wm_base::{self, XdgWmBase},
+    xdg_surface::{self, XdgSurface},
+    xdg_toplevel::{self, XdgToplevel},
+    xdg_wm_base::{self, XdgWmBase},
 };
 
 use wayland_protocols::{
@@ -70,11 +70,11 @@ use wayland_client::{
     globals::{BindError, GlobalError},
 };
 
-use crate::region::{LogicalRegion, Position, Region, Size};
-use crate::output::OutputInfo;
+use crate::{WayshotError, WayshotBase};
+use crate::dispatch::{FrameState, OutputCaptureState, XdgShellState};
 use crate::error::HaruhiError;
-use crate::dispatch::{XdgShellState, FrameState};
-use crate::WayshotBase; // Add this import
+use crate::output::OutputInfo;
+use crate::region::{LogicalRegion, Position, Region, Size}; // Add this import
 
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
@@ -276,7 +276,7 @@ pub struct HaruhiShotBase<T> {
 #[derive(Debug)]
 pub struct HaruhiShotState {
     pub base: WayshotBase, // Connection, globals and output info
-    pub ext_image: HaruhiShotBase<Self>,
+    pub ext_image: Option<HaruhiShotBase<Self>>,
 }
 
 impl HaruhiShotState {
@@ -285,36 +285,56 @@ impl HaruhiShotState {
         &self.base.output_infos
     }
 
-    pub fn new() -> Result<Self, HaruhiError> {
-        Self::init(None)
-    }
-
     pub(crate) fn take_event_queue(&mut self) -> EventQueue<Self> {
-        self.ext_image.event_queue.take().expect("control your self")
+        self.ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .event_queue
+            .take()
+            .expect("control your self")
     }
 
     pub(crate) fn output_image_manager(&self) -> &ExtOutputImageCaptureSourceManagerV1 {
-        self.ext_image.output_image_manager.as_ref().expect("Should init")
+        self.ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .output_image_manager
+            .as_ref()
+            .expect("Should init")
     }
 
     pub(crate) fn image_copy_capture_manager(&self) -> &ExtImageCopyCaptureManagerV1 {
-        self.ext_image.img_copy_manager.as_ref().expect("Should init")
+        self.ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .img_copy_manager
+            .as_ref()
+            .expect("Should init")
     }
 
     pub(crate) fn qhandle(&self) -> &QueueHandle<Self> {
-        self.ext_image.qh.as_ref().expect("Should init")
-    }
-
-    pub fn new_with_connection(connection: Connection) -> Result<Self, HaruhiError> {
-        Self::init(Some(connection))
+        self.ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .qh
+            .as_ref()
+            .expect("Should init")
     }
 
     pub(crate) fn shm(&self) -> &WlShm {
-        self.ext_image.shm.as_ref().expect("Should init")
+        self.ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .shm
+            .as_ref()
+            .expect("Should init")
     }
 
     pub(crate) fn reset_event_queue(&mut self, event_queue: EventQueue<Self>) {
-        self.ext_image.event_queue = Some(event_queue);
+        self.ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .event_queue = Some(event_queue);
     }
 
     pub fn connection(&self) -> &Connection {
@@ -325,7 +345,11 @@ impl HaruhiShotState {
         &self.base.globals
     }
 
-    fn init(connection: Option<Connection>) -> Result<Self, HaruhiError> {
+    pub fn new() -> Result<Self, HaruhiError> {
+        Self::from_connection(None)
+    }
+
+    fn from_connection(connection: Option<Connection>) -> Result<Self, HaruhiError> {
         let conn = if let Some(conn) = connection {
             conn
         } else {
@@ -333,8 +357,7 @@ impl HaruhiShotState {
         };
 
         let (globals, mut event_queue) = registry_queue_init::<HaruhiShotState>(&conn)?;
-        let display = conn.display();
-
+        
         // Create a new state with the base fields
         let mut state = Self {
             base: WayshotBase {
@@ -342,41 +365,108 @@ impl HaruhiShotState {
                 globals,
                 output_infos: Vec::new(),
             },
-            ext_image: HaruhiShotBase {
+            ext_image: Some(HaruhiShotBase {
                 toplevels: Vec::new(),
                 img_copy_manager: None,
                 output_image_manager: None,
                 shm: None,
                 qh: None,
                 event_queue: None,
-            },
+            }),
         };
+
+        // First refresh outputs to populate the output_infos
+        state.refresh_outputs(); //?;
 
         let qh = event_queue.handle();
 
-        let _registry = display.get_registry(&qh, ());
-        event_queue.blocking_dispatch(&mut state)?;
-        let image_manager = state.base.globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
-        let output_image_manager =
-            state.base.globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
+        // Now bind to globals after outputs are refreshed
+        let image_manager = state
+            .base
+            .globals
+            .bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
+        let output_image_manager = state
+            .base
+            .globals
+            .bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
         let shm = state.base.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
-        state.base.globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
-        let the_xdg_output_manager = state.base.globals.bind::<ZxdgOutputManagerV1, _, _>(&qh, 3..=3, ())?;
-
-        for output in state.base.output_infos.iter_mut() {
-            let xdg_the_output = the_xdg_output_manager.get_xdg_output(&output.output, &qh, ());
-            output.xdg_output = Some(xdg_the_output);
-        }
-
+        state
+            .base
+            .globals
+            .bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
+            
+        // XDG output manager is already used in refresh_outputs, so we don't need to
+        // create it again and iterate through outputs here
+        
         event_queue.blocking_dispatch(&mut state)?;
 
-        state.ext_image.img_copy_manager = Some(image_manager);
-        state.ext_image.output_image_manager = Some(output_image_manager);
-        state.ext_image.qh = Some(qh);
-        state.ext_image.shm = Some(shm);
-        state.ext_image.event_queue = Some(event_queue);
+        // Store the globals we fetched
+        let ext_image = state.ext_image.as_mut().expect("ext_image should be initialized");
+        ext_image.img_copy_manager = Some(image_manager);
+        ext_image.output_image_manager = Some(output_image_manager);
+        ext_image.qh = Some(qh);
+        ext_image.shm = Some(shm);
+        ext_image.event_queue = Some(event_queue);
+        
         Ok(state)
     }
+
+	/// refresh the outputs, to get new outputs
+	pub fn refresh_outputs(&mut self) -> crate::Result<()> {
+		// Connecting to wayland environment.
+		let mut state = OutputCaptureState {
+			outputs: Vec::new(),
+		};
+		let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
+		let qh = event_queue.handle();
+
+		// Bind to xdg_output global.
+		let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
+			&qh,
+			3..=3,
+			(),
+		) {
+			Ok(x) => x,
+			Err(e) => {
+				tracing::error!(
+                    "Failed to create ZxdgOutputManagerV1 version 3. Does your compositor implement ZxdgOutputManagerV1?"
+                );
+				panic!("{:#?}", e);
+			}
+		};
+
+		// Fetch all outputs; when their names arrive, add them to the list
+		let _ = self.base.conn.display().get_registry(&qh, ());
+		event_queue.roundtrip(&mut state)?;
+
+		// We loop over each output and request its position data.
+		// Also store the xdg_output reference in the OutputInfo
+		let xdg_outputs: Vec<ZxdgOutputV1> = state
+			.outputs
+			.iter_mut()
+			.enumerate()
+			.map(|(index, output)| {
+				let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
+				output.xdg_output = Some(xdg_output.clone());
+				xdg_output
+			})
+			.collect();
+
+		event_queue.roundtrip(&mut state)?;
+
+		for xdg_output in xdg_outputs {
+			xdg_output.destroy();
+		}
+
+		if state.outputs.is_empty() {
+			tracing::error!("Compositor did not advertise any wl_output devices!");
+			return Err(WayshotError::NoOutputs);
+		}
+		tracing::trace!("Outputs detected: {:#?}", state.outputs);
+		self.base.output_infos = state.outputs;
+
+		Ok(())
+	}
 
     /// Capture a single output
     pub fn ext_capture_single_output(
@@ -391,7 +481,12 @@ impl HaruhiShotState {
             height,
             frame_format,
             ..
-        } = self.ext_capture_output_inner(output.clone(), option, mem_file.as_fd(), Some(&mem_file))?;
+        } = self.ext_capture_output_inner(
+            output.clone(),
+            option,
+            mem_file.as_fd(),
+            Some(&mem_file),
+        )?;
 
         let mut frame_mmap = unsafe { MmapMut::map_mut(&mem_file).unwrap() };
 
@@ -519,7 +614,9 @@ impl HaruhiShotState {
                         )));
                     },
                     None => {
-                        return Err(HaruhiError::CaptureFailed("No failure reason provided".to_owned()));
+                        return Err(HaruhiError::CaptureFailed(
+                            "No failure reason provided".to_owned(),
+                        ));
                     }
                 },
                 FrameState::Pending => {}
@@ -752,7 +849,12 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for HaruhiShotState {
         _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
         if let ext_foreign_toplevel_list_v1::Event::Toplevel { toplevel } = event {
-            state.ext_image.toplevels.push(TopLevel::new(toplevel));
+            state
+                .ext_image
+                .as_mut()
+                .expect("ext_image should be initialized")
+                .toplevels
+                .push(TopLevel::new(toplevel));
         }
     }
     event_created_child!(HaruhiShotState, ExtForeignToplevelHandleV1, [
@@ -773,7 +875,10 @@ impl Dispatch<ExtForeignToplevelHandleV1, ()> for HaruhiShotState {
             return;
         };
         let Some(current_info) = state
-            .ext_image.toplevels
+            .ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .toplevels
             .iter_mut()
             .find(|my_toplevel| my_toplevel.handle == *toplevel)
         else {
