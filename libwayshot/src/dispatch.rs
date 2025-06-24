@@ -449,7 +449,7 @@ use wayland_client::{
 };
 
 use crate::ext_image_protocols::{CaptureInfo, FrameInfo, TopLevel};
-use crate::{WayshotBase, WayshotConnection, WayshotError}; // Add this import
+use crate::{WayshotConnection, WayshotError}; // Add this import
 
 delegate_noop!(WayshotConnection: ignore ExtImageCaptureSourceV1);
 delegate_noop!(WayshotConnection: ignore ExtOutputImageCaptureSourceManagerV1);

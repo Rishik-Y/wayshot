@@ -73,7 +73,7 @@ use wayland_client::{
 use crate::dispatch::{DMABUFState, FrameState, OutputCaptureState, XdgShellState};
 use crate::output::OutputInfo;
 use crate::region::{LogicalRegion, Position, Region, Size};
-use crate::{WayshotBase, WayshotError}; // Add this import
+use crate::WayshotError; // Removed WayshotBase import
 
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
