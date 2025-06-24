@@ -1321,7 +1321,7 @@ impl WayshotConnection {
         };
 
         // First refresh outputs to populate the output_infos
-        state.ext_refresh_outputs()?;
+        state.refresh_outputs()?;
 
         let qh = event_queue.handle();
 
@@ -1357,63 +1357,6 @@ impl WayshotConnection {
         ext_image.event_queue = Some(event_queue);
 
         Ok(state)
-    }
-
-    /// refresh the outputs, to get new outputs
-    pub fn ext_refresh_outputs(&mut self) -> crate::Result<()> {
-        // Connecting to wayland environment.
-        let mut state = OutputCaptureState {
-            outputs: Vec::new(),
-        };
-        let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
-        let qh = event_queue.handle();
-
-        // Bind to xdg_output global.
-        let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
-            &qh,
-            3..=3,
-            (),
-        ) {
-            Ok(x) => x,
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create ZxdgOutputManagerV1 version 3. Does your compositor implement ZxdgOutputManagerV1?"
-                );
-                panic!("{:#?}", e);
-            }
-        };
-
-        // Fetch all outputs; when their names arrive, add them to the list
-        let _ = self.base.conn.display().get_registry(&qh, ());
-        event_queue.roundtrip(&mut state)?;
-
-        // We loop over each output and request its position data.
-        // Also store the xdg_output reference in the OutputInfo
-        let xdg_outputs: Vec<ZxdgOutputV1> = state
-            .outputs
-            .iter_mut()
-            .enumerate()
-            .map(|(index, output)| {
-                let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
-                output.xdg_output = Some(xdg_output.clone());
-                xdg_output
-            })
-            .collect();
-
-        event_queue.roundtrip(&mut state)?;
-
-        for xdg_output in xdg_outputs {
-            xdg_output.destroy();
-        }
-
-        if state.outputs.is_empty() {
-            tracing::error!("Compositor did not advertise any wl_output devices!");
-            return Err(WayshotError::NoOutputs);
-        }
-        tracing::trace!("Outputs detected: {:#?}", state.outputs);
-        self.base.output_infos = state.outputs;
-
-        Ok(())
     }
 
     /// Capture a single output
