@@ -194,12 +194,10 @@ impl WayshotConnection {
         // Also store the xdg_output reference in the OutputInfo
         let xdg_outputs: Vec<ZxdgOutputV1> = state
             .outputs
-            .iter_mut()
+            .iter()
             .enumerate()
             .map(|(index, output)| {
-                let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
-                output.xdg_output = Some(xdg_output.clone());
-                xdg_output
+                zxdg_output_manager.get_xdg_output(&output.output, &qh, index)
             })
             .collect();
 

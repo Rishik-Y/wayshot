@@ -15,7 +15,6 @@ pub struct OutputInfo {
     pub transform: wl_output::Transform,
     pub physical_size: Size,
     pub logical_region: LogicalRegion,
-    pub xdg_output: Option<ZxdgOutputV1>,
     pub scale: i32,
 }
 
