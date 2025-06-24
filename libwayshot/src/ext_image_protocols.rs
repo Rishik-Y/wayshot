@@ -70,7 +70,7 @@ use wayland_client::{
     globals::{BindError, GlobalError},
 };
 
-use crate::dispatch::{FrameState, OutputCaptureState, XdgShellState};
+use crate::dispatch::{FrameState, OutputCaptureState, XdgShellState, DMABUFState};
 use crate::error::HaruhiError;
 use crate::output::OutputInfo;
 use crate::region::{LogicalRegion, Position, Region, Size};
@@ -276,7 +276,8 @@ pub struct HaruhiShotBase<T> {
 #[derive(Debug)]
 pub struct HaruhiShotState {
     pub base: WayshotBase, // Connection, globals and output info
-    pub ext_image: Option<HaruhiShotBase<Self>>,
+	dmabuf_state: Option<DMABUFState>,
+	pub ext_image: Option<HaruhiShotBase<Self>>,
 }
 
 impl HaruhiShotState {
@@ -346,10 +347,10 @@ impl HaruhiShotState {
     }
 
     pub fn new() -> Result<Self, HaruhiError> {
-        Self::from_connection(None)
+        Self::from_ext_connection(None)
     }
 
-    fn from_connection(connection: Option<Connection>) -> Result<Self, HaruhiError> {
+    fn from_ext_connection(connection: Option<Connection>) -> Result<Self, HaruhiError> {
         let conn = if let Some(conn) = connection {
             conn
         } else {
@@ -365,6 +366,7 @@ impl HaruhiShotState {
                 globals,
                 output_infos: Vec::new(),
             },
+            dmabuf_state: None, // Initialize dmabuf_state as None
             ext_image: Some(HaruhiShotBase {
                 toplevels: Vec::new(),
                 img_copy_manager: None,
