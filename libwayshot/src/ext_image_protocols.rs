@@ -70,11 +70,11 @@ use wayland_client::{
     globals::{BindError, GlobalError},
 };
 
-use crate::{WayshotError, WayshotBase};
 use crate::dispatch::{FrameState, OutputCaptureState, XdgShellState};
 use crate::error::HaruhiError;
 use crate::output::OutputInfo;
-use crate::region::{LogicalRegion, Position, Region, Size}; // Add this import
+use crate::region::{LogicalRegion, Position, Region, Size};
+use crate::{WayshotBase, WayshotError}; // Add this import
 
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
@@ -357,7 +357,7 @@ impl HaruhiShotState {
         };
 
         let (globals, mut event_queue) = registry_queue_init::<HaruhiShotState>(&conn)?;
-        
+
         // Create a new state with the base fields
         let mut state = Self {
             base: WayshotBase {
@@ -394,79 +394,82 @@ impl HaruhiShotState {
             .base
             .globals
             .bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
-            
+
         // XDG output manager is already used in refresh_outputs, so we don't need to
         // create it again and iterate through outputs here
-        
+
         event_queue.blocking_dispatch(&mut state)?;
 
         // Store the globals we fetched
-        let ext_image = state.ext_image.as_mut().expect("ext_image should be initialized");
+        let ext_image = state
+            .ext_image
+            .as_mut()
+            .expect("ext_image should be initialized");
         ext_image.img_copy_manager = Some(image_manager);
         ext_image.output_image_manager = Some(output_image_manager);
         ext_image.qh = Some(qh);
         ext_image.shm = Some(shm);
         ext_image.event_queue = Some(event_queue);
-        
+
         Ok(state)
     }
 
-	/// refresh the outputs, to get new outputs
-	pub fn refresh_outputs(&mut self) -> crate::Result<()> {
-		// Connecting to wayland environment.
-		let mut state = OutputCaptureState {
-			outputs: Vec::new(),
-		};
-		let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
-		let qh = event_queue.handle();
+    /// refresh the outputs, to get new outputs
+    pub fn refresh_outputs(&mut self) -> crate::Result<()> {
+        // Connecting to wayland environment.
+        let mut state = OutputCaptureState {
+            outputs: Vec::new(),
+        };
+        let mut event_queue = self.base.conn.new_event_queue::<OutputCaptureState>();
+        let qh = event_queue.handle();
 
-		// Bind to xdg_output global.
-		let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
-			&qh,
-			3..=3,
-			(),
-		) {
-			Ok(x) => x,
-			Err(e) => {
-				tracing::error!(
+        // Bind to xdg_output global.
+        let zxdg_output_manager = match self.base.globals.bind::<ZxdgOutputManagerV1, _, _>(
+            &qh,
+            3..=3,
+            (),
+        ) {
+            Ok(x) => x,
+            Err(e) => {
+                tracing::error!(
                     "Failed to create ZxdgOutputManagerV1 version 3. Does your compositor implement ZxdgOutputManagerV1?"
                 );
-				panic!("{:#?}", e);
-			}
-		};
+                panic!("{:#?}", e);
+            }
+        };
 
-		// Fetch all outputs; when their names arrive, add them to the list
-		let _ = self.base.conn.display().get_registry(&qh, ());
-		event_queue.roundtrip(&mut state)?;
+        // Fetch all outputs; when their names arrive, add them to the list
+        let _ = self.base.conn.display().get_registry(&qh, ());
+        event_queue.roundtrip(&mut state)?;
 
-		// We loop over each output and request its position data.
-		// Also store the xdg_output reference in the OutputInfo
-		let xdg_outputs: Vec<ZxdgOutputV1> = state
-			.outputs
-			.iter_mut()
-			.enumerate()
-			.map(|(index, output)| {
-				let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
-				output.xdg_output = Some(xdg_output.clone());
-				xdg_output
-			})
-			.collect();
+        // We loop over each output and request its position data.
+        // Also store the xdg_output reference in the OutputInfo
+        let xdg_outputs: Vec<ZxdgOutputV1> = state
+            .outputs
+            .iter_mut()
+            .enumerate()
+            .map(|(index, output)| {
+                let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
+                output.xdg_output = Some(xdg_output.clone());
+                xdg_output
+            })
+            .collect();
 
-		event_queue.roundtrip(&mut state)?;
+        event_queue.roundtrip(&mut state)?;
 
-		for xdg_output in xdg_outputs {
-			xdg_output.destroy();
-		}
+        for xdg_output in xdg_outputs {
+            xdg_output.destroy();
+        }
 
-		if state.outputs.is_empty() {
-			tracing::error!("Compositor did not advertise any wl_output devices!");
-			return Err(WayshotError::NoOutputs);
-		}
-		tracing::trace!("Outputs detected: {:#?}", state.outputs);
-		self.base.output_infos = state.outputs;
+        if state.outputs.is_empty() {
+            tracing::error!("Compositor did not advertise any wl_output devices!");
+            return Err(WayshotError::NoOutputs);
+        }
+        tracing::trace!("Outputs detected: {:#?}", state.outputs);
+        self.base.output_infos = state.outputs;
 
-		Ok(())
-	}
+        Ok(())
+    }
 
     /// Capture a single output
     pub fn ext_capture_single_output(
@@ -612,7 +615,7 @@ impl HaruhiShotState {
                         return Err(HaruhiError::CaptureFailed(format!(
                             "Unknown reason, code : {code}"
                         )));
-                    },
+                    }
                     None => {
                         return Err(HaruhiError::CaptureFailed(
                             "No failure reason provided".to_owned(),
