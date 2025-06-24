@@ -5,12 +5,21 @@
 
 mod convert;
 mod dispatch;
-mod error;
+pub mod error;
+pub mod ext_image_protocols;
 mod image_util;
 pub mod output;
 pub mod region;
 mod screencopy;
 
+use dispatch::{DMABUFState, XdgShellState};
+use image::{DynamicImage, imageops::replace};
+use khronos_egl::{self as egl, Instance};
+use memmap2::MmapMut;
+use region::{EmbeddedRegion, RegionCapturer};
+use screencopy::{DMAFrameFormat, DMAFrameGuard, EGLImageGuard, FrameData, FrameGuard};
+use std::ops::Deref;
+use std::sync::{Arc, RwLock};
 use std::{
     collections::HashSet,
     ffi::c_void,
@@ -19,16 +28,9 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     thread,
 };
-
-use dispatch::{DMABUFState, LayerShellState};
-use image::{DynamicImage, imageops::replace};
-use khronos_egl::{self as egl, Instance};
-use memmap2::MmapMut;
-use region::{EmbeddedRegion, RegionCapturer};
-use screencopy::{DMAFrameFormat, DMAFrameGuard, EGLImageGuard, FrameData, FrameGuard};
 use tracing::debug;
 use wayland_client::{
-    Connection, EventQueue, Proxy,
+    Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop, event_created_child,
     globals::{GlobalList, registry_queue_init},
     protocol::{
         wl_compositor::WlCompositor,
@@ -47,15 +49,9 @@ use wayland_protocols::{
         zxdg_output_manager_v1::ZxdgOutputManagerV1, zxdg_output_v1::ZxdgOutputV1,
     },
 };
-use wayland_protocols_wlr::{
-    layer_shell::v1::client::{
-        zwlr_layer_shell_v1::{Layer, ZwlrLayerShellV1},
-        zwlr_layer_surface_v1::Anchor,
-    },
-    screencopy::v1::client::{
-        zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
-        zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
-    },
+use wayland_protocols_wlr::screencopy::v1::client::{
+    zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
+    zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
 use crate::{
@@ -66,13 +62,30 @@ use crate::{
     screencopy::{FrameCopy, FrameFormat, create_shm_fd},
 };
 
-pub use crate::error::{Error, Result};
+pub use crate::error::{Result, WayshotError};
 
 pub mod reexport {
     use wayland_client::protocol::wl_output;
     pub use wl_output::{Transform, WlOutput};
 }
+use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, FrameInfo, HaruhiShotBase, ImageViewInfo, TopLevel};
 use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
+use wayland_backend::protocol::WEnum;
+use wayland_client::globals::GlobalListContents;
+use wayland_client::protocol::wl_registry::WlRegistry;
+use wayland_client::protocol::wl_surface::WlSurface;
+use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1;
+use wayland_protocols::ext::foreign_toplevel_list::v1::client::{ext_foreign_toplevel_handle_v1, ext_foreign_toplevel_list_v1};
+use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
+use wayland_protocols::ext::image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1;
+use wayland_protocols::ext::image_copy_capture::v1::client::{ext_image_copy_capture_frame_v1, ext_image_copy_capture_session_v1};
+use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::{ExtImageCopyCaptureFrameV1, FailureReason};
+use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
+use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1;
+use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
+use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
+use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
+use crate::region::Region;
 
 /// Struct to store wayland connection and globals list.
 /// # Example usage
@@ -82,30 +95,38 @@ use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 /// let wayshot_connection = WayshotConnection::new()?;
 /// let image_buffer = wayshot_connection.screenshot_all()?;
 /// ```
+
 #[derive(Debug)]
 pub struct WayshotConnection {
     pub conn: Connection,
     pub globals: GlobalList,
-    output_infos: Vec<OutputInfo>,
+    pub output_infos: Vec<OutputInfo>, // Make this pub so it can be used in ext_image_protocols
     dmabuf_state: Option<DMABUFState>,
+    pub ext_image: Option<HaruhiShotBase<Self>>,
 }
 
 impl WayshotConnection {
-    pub fn new() -> Result<Self> {
-        let conn = Connection::connect_to_env()?;
-
-        Self::from_connection(conn)
+    pub fn new() -> Result<
+        Self, //, HaruhiError
+    > {
+        Self::from_connection(None)
     }
 
     /// Recommended if you already have a [`wayland_client::Connection`].
-    pub fn from_connection(conn: Connection) -> Result<Self> {
-        let (globals, _) = registry_queue_init::<WayshotState>(&conn)?;
+    pub fn from_connection(connection: Option<Connection>) -> Result<Self> {
+        let conn = if let Some(conn) = connection {
+            conn
+        } else {
+            Connection::connect_to_env()?
+        };
+        let (globals, mut event_queue) = registry_queue_init::<WayshotState>(&conn)?;
 
         let mut initial_state = Self {
             conn,
             globals,
             output_infos: Vec::new(),
             dmabuf_state: None,
+            ext_image: None,
         };
 
         initial_state.refresh_outputs()?;
@@ -133,37 +154,13 @@ impl WayshotConnection {
                 linux_dmabuf,
                 gbmdev: gbm,
             }),
+            ext_image: None,
         };
 
         initial_state.refresh_outputs()?;
 
         Ok(initial_state)
     }
-
-    /// Fetch all accessible wayland outputs.
-    pub fn get_all_outputs(&self) -> &[OutputInfo] {
-        self.output_infos.as_slice()
-    }
-
-	/// print the displays' info
-	pub fn print_displays_info(&self) {
-		for OutputInfo {
-			physical_size: Size { width, height },
-			logical_region: LogicalRegion {inner: region::Region { position: region::Position {x,y}, size: Size {width: logical_width,height: logical_height}}},
-			name,
-			description,
-			// scale,
-			..
-		} in self.get_all_outputs()
-		{
-			println!("{name}");
-			println!("description: {description}");
-			println!("    Size: {width},{height}");
-			println!("    LogicSize: {logical_width}, {logical_height}");
-			println!("    Position: {x}, {y}");
-			// println!("    Scale: {scale}");
-		}
-	}
 
     /// refresh the outputs, to get new outputs
     pub fn refresh_outputs(&mut self) -> Result<()> {
@@ -194,12 +191,15 @@ impl WayshotConnection {
         event_queue.roundtrip(&mut state)?;
 
         // We loop over each output and request its position data.
+        // Also store the xdg_output reference in the OutputInfo
         let xdg_outputs: Vec<ZxdgOutputV1> = state
             .outputs
-            .iter()
+            .iter_mut()
             .enumerate()
             .map(|(index, output)| {
-                zxdg_output_manager.get_xdg_output(&output.wl_output, &qh, index)
+                let xdg_output = zxdg_output_manager.get_xdg_output(&output.output, &qh, index);
+                output.xdg_output = Some(xdg_output.clone());
+                xdg_output
             })
             .collect();
 
@@ -211,12 +211,48 @@ impl WayshotConnection {
 
         if state.outputs.is_empty() {
             tracing::error!("Compositor did not advertise any wl_output devices!");
-            return Err(Error::NoOutputs);
+            return Err(WayshotError::NoOutputs);
         }
         tracing::trace!("Outputs detected: {:#?}", state.outputs);
         self.output_infos = state.outputs;
 
         Ok(())
+    }
+
+    /// Fetch all accessible wayland outputs.
+    pub fn get_all_outputs(&self) -> &[OutputInfo] {
+        self.output_infos.as_slice()
+    }
+
+    /// print the displays' info
+    pub fn print_displays_info(&self) {
+        for OutputInfo {
+            physical_size: Size { width, height },
+            logical_region:
+                LogicalRegion {
+                    inner:
+                        region::Region {
+                            position: region::Position { x, y },
+                            size:
+                                Size {
+                                    width: logical_width,
+                                    height: logical_height,
+                                },
+                        },
+                },
+            name,
+            description,
+            // scale,
+            ..
+        } in self.get_all_outputs()
+        {
+            println!("{name}");
+            println!("description: {description}");
+            println!("    Size: {width},{height}");
+            println!("    LogicSize: {logical_width}, {logical_height}");
+            println!("    Position: {x}, {y}");
+            // println!("    Scale: {scale}");
+        }
     }
 
     /// Get a FrameCopy instance with screenshot pixel data for any wl_output object.
@@ -274,7 +310,7 @@ impl WayshotConnection {
     /// # Returns
     /// - If the function was found and called, an OK(()), note that this does not necessarily mean that binding was successful, only that the function was called.
     ///   The caller may check for any OpenGL errors using the standard routes.
-    /// - If the function was not found, [`Error::EGLImageToTexProcNotFoundError`] is returned
+    /// - If the function was not found, [`WayshotError::EGLImageToTexProcNotFoundError`] is returned
     pub unsafe fn bind_output_frame_to_gl_texture(
         &self,
         cursor_overlay: bool,
@@ -296,7 +332,7 @@ impl WayshotConnection {
                     }
                     None => {
                         tracing::error!("glEGLImageTargetTexture2DOES not found");
-                        return Err(Error::EGLImageToTexProcNotFoundError);
+                        return Err(WayshotError::EGLImageToTexProcNotFoundError);
                     }
                 });
 
@@ -470,7 +506,7 @@ impl WayshotConnection {
 
                 Ok((frame_format, frame_guard, bo))
             }
-            None => Err(Error::NoDMAStateError),
+            None => Err(WayshotError::NoDMAStateError),
         }
     }
 
@@ -511,7 +547,7 @@ impl WayshotConnection {
                     "Failed to create screencopy manager. Does your compositor implement ZwlrScreencopy?"
                 );
                 tracing::error!("err: {e}");
-                return Err(Error::ProtocolNotFound(
+                return Err(WayshotError::ProtocolNotFound(
                     "ZwlrScreencopy Manager not found".to_string(),
                 ));
             }
@@ -562,7 +598,7 @@ impl WayshotConnection {
             // Check if frame format exists.
             .ok_or_else(|| {
                 tracing::error!("No suitable frame format found");
-                Error::NoSupportedBufferFormat
+                WayshotError::NoSupportedBufferFormat
             })?;
         tracing::trace!("Selected frame buffer format: {:#?}", frame_format);
 
@@ -601,7 +637,7 @@ impl WayshotConnection {
                     "Failed to create screencopy manager. Does your compositor implement ZwlrScreencopy?"
                 );
                 tracing::error!("err: {e}");
-                return Err(Error::ProtocolNotFound(
+                return Err(WayshotError::ProtocolNotFound(
                     "ZwlrScreencopy Manager not found".to_string(),
                 ));
             }
@@ -653,6 +689,7 @@ impl WayshotConnection {
     ) -> Result<DMAFrameGuard> {
         match &self.dmabuf_state {
             Some(dmabuf_state) => {
+                println!("The program screenshoted via dmabuf");
                 // Connecting to wayland environment.
                 let qh = event_queue.handle();
 
@@ -689,16 +726,19 @@ impl WayshotConnection {
                     // Basically reads, if frame state is not None then...
                     if let Some(state) = state.state {
                         match state {
-                            FrameState::Failed => {
+                            FrameState::Failed(_) => {
                                 tracing::error!("Frame copy failed");
-                                return Err(Error::FramecopyFailed);
+                                return Err(WayshotError::FramecopyFailed);
                             }
-                            FrameState::Finished => {
+                            FrameState::Succeeded => {
                                 tracing::trace!("Frame copy finished");
 
                                 return Ok(DMAFrameGuard {
                                     buffer: dmabuf_wlbuf,
                                 });
+                            }
+                            FrameState::Pending => {
+                                // If still pending, continue the event loop to wait for status change
                             }
                         }
                     }
@@ -706,7 +746,7 @@ impl WayshotConnection {
                     event_queue.blocking_dispatch(&mut state)?;
                 }
             }
-            None => Err(Error::NoDMAStateError),
+            None => Err(WayshotError::NoDMAStateError),
         }
     }
 
@@ -719,6 +759,7 @@ impl WayshotConnection {
         fd: T,
     ) -> Result<FrameGuard> {
         // Connecting to wayland environment.
+        println!("The program screenshoted via wlshm");
         let qh = event_queue.handle();
 
         // Instantiate shm global.
@@ -728,7 +769,7 @@ impl WayshotConnection {
             frame_format
                 .byte_size()
                 .try_into()
-                .map_err(|_| Error::BufferTooSmall)?,
+                .map_err(|_| WayshotError::BufferTooSmall)?,
             &qh,
             (),
         );
@@ -749,13 +790,16 @@ impl WayshotConnection {
             // Basically reads, if frame state is not None then...
             if let Some(state) = state.state {
                 match state {
-                    FrameState::Failed => {
+                    FrameState::Failed(_) => {
                         tracing::error!("Frame copy failed");
-                        return Err(Error::FramecopyFailed);
+                        return Err(WayshotError::FramecopyFailed);
                     }
-                    FrameState::Finished => {
+                    FrameState::Succeeded => {
                         tracing::trace!("Frame copy finished");
                         return Ok(FrameGuard { buffer, shm_pool });
+                    }
+                    FrameState::Pending => {
+                        // If still pending, continue the event loop to wait for status change
                     }
                 }
             }
@@ -779,7 +823,7 @@ impl WayshotConnection {
 
         let (frame_format, frame_guard) = self.capture_output_frame_shm_from_file(
             cursor_overlay,
-            &output_info.wl_output,
+            &output_info.output,
             &mem_file,
             capture_region,
         )?;
@@ -793,7 +837,7 @@ impl WayshotConnection {
                 tracing::error!(
                     "You can send a feature request for the above format to the mailing list for wayshot over at https://sr.ht/~shinyzenith/wayshot."
                 );
-                return Err(Error::NoSupportedBufferFormat);
+                return Err(WayshotError::NoSupportedBufferFormat);
             }
         };
         let rotated_physical_size = match output_info.transform {
@@ -841,13 +885,11 @@ impl WayshotConnection {
         callback: F,
     ) -> Result<LogicalRegion>
     where
-        F: Fn(&WayshotConnection) -> Result<LogicalRegion, Error>,
+        F: Fn(&WayshotConnection) -> Result<LogicalRegion, WayshotError>,
     {
-        let mut state = LayerShellState {
-            configured_outputs: HashSet::new(),
-        };
-        let mut event_queue: EventQueue<LayerShellState> =
-            self.conn.new_event_queue::<LayerShellState>();
+        let mut state = XdgShellState::new();
+        let mut event_queue: EventQueue<XdgShellState> =
+            self.conn.new_event_queue::<XdgShellState>();
         let qh = event_queue.handle();
 
         let compositor = match self.globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ()) {
@@ -857,31 +899,44 @@ impl WayshotConnection {
                     "Failed to create compositor. Does your compositor implement WlCompositor?"
                 );
                 tracing::error!("err: {e}");
-                return Err(Error::ProtocolNotFound(
+                return Err(WayshotError::ProtocolNotFound(
                     "WlCompositor not found".to_string(),
                 ));
             }
         };
-        let layer_shell = match self.globals.bind::<ZwlrLayerShellV1, _, _>(&qh, 1..=1, ()) {
+
+        // Use XDG shell instead of layer shell
+        let xdg_wm_base = match self
+            .globals
+            .bind::<wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase, _, _>(
+            &qh,
+            1..=1,
+            (),
+        ) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!(
-                    "Failed to create layer shell. Does your compositor implement WlrLayerShellV1?"
+                    "Failed to create xdg_wm_base. Does your compositor implement XdgWmBase?"
                 );
                 tracing::error!("err: {e}");
-                return Err(Error::ProtocolNotFound(
-                    "WlrLayerShellV1 not found".to_string(),
+                return Err(WayshotError::ProtocolNotFound(
+                    "XdgWmBase not found".to_string(),
                 ));
             }
         };
-        let viewporter = self.globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
+
+        let viewporter = self
+            .globals
+            .bind::<WpViewporter, _, _>(&qh, 1..=1, ())
+            .ok();
         if viewporter.is_none() {
             tracing::info!(
                 "Compositor does not support wp_viewporter, display scaling may be inaccurate."
             );
         }
 
-        let mut layer_shell_surfaces = Vec::with_capacity(frames.len());
+        // Use a vector to store XDG surfaces instead of layer shell surfaces
+        let mut xdg_surfaces = Vec::with_capacity(frames.len());
 
         for (frame_copy, frame_guard, output_info) in frames {
             tracing::span!(
@@ -892,32 +947,25 @@ impl WayshotConnection {
             .in_scope(|| -> Result<()> {
                 let surface = compositor.create_surface(&qh, ());
 
-                let layer_surface = layer_shell.get_layer_surface(
-                    &surface,
-                    Some(&output_info.wl_output),
-                    Layer::Top,
-                    "wayshot".to_string(),
-                    &qh,
-                    output_info.wl_output.clone(),
-                );
+                // Create XDG surface and toplevel instead of layer shell surface
+                let xdg_surface =
+                    xdg_wm_base.get_xdg_surface(&surface, &qh, output_info.output.clone());
+                let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
 
-                layer_surface.set_exclusive_zone(-1);
-                layer_surface.set_anchor(Anchor::Top | Anchor::Left);
-                layer_surface.set_size(
-                    frame_copy.frame_format.size.width,
-                    frame_copy.frame_format.size.height,
-                );
+                // Configure the toplevel to be fullscreen on the specific output
+                xdg_toplevel.set_fullscreen(Some(&output_info.output));
+                xdg_toplevel.set_title("wayshot-overlay".to_string());
+                xdg_toplevel.set_app_id("wayshot".to_string());
 
                 debug!("Committing surface creation changes.");
                 surface.commit();
 
-                debug!("Waiting for layer surface to be configured.");
-                while !state.configured_outputs.contains(&output_info.wl_output) {
+                debug!("Waiting for XDG surface to be configured.");
+                while !state.configured_surfaces.contains(&xdg_surface) {
                     event_queue.blocking_dispatch(&mut state)?;
                 }
 
                 surface.set_buffer_transform(output_info.transform);
-                // surface.set_buffer_scale(output_info.scale());
                 surface.attach(Some(&frame_guard.buffer), 0, 0);
 
                 if let Some(viewporter) = viewporter.as_ref() {
@@ -930,7 +978,7 @@ impl WayshotConnection {
 
                 debug!("Committing surface with attached buffer.");
                 surface.commit();
-                layer_shell_surfaces.push((surface, layer_surface));
+                xdg_surfaces.push((surface, xdg_surface, xdg_toplevel));
                 event_queue.blocking_dispatch(&mut state)?;
 
                 Ok(())
@@ -939,11 +987,12 @@ impl WayshotConnection {
 
         let callback_result = callback(self);
 
-        debug!("Unmapping and destroying layer shell surfaces.");
-        for (surface, layer_shell_surface) in layer_shell_surfaces.iter() {
+        debug!("Unmapping and destroying XDG shell surfaces.");
+        for (surface, xdg_surface, xdg_toplevel) in xdg_surfaces.iter() {
             surface.attach(None, 0, 0);
-            surface.commit(); //unmap surface by committing a null buffer
-            layer_shell_surface.destroy();
+            surface.commit(); // unmap surface by committing a null buffer
+            xdg_toplevel.destroy();
+            xdg_surface.destroy();
         }
         event_queue.roundtrip(&mut state)?;
 
@@ -1013,7 +1062,7 @@ impl WayshotConnection {
         thread::scope(|scope| {
             let max_scale = outputs_capture_regions
                 .iter()
-                .map(|(output_info, _)| output_info.scale())
+                .map(|(output_info, _)| output_info.scale as f64)
                 .fold(1.0, f64::max);
 
             tracing::Span::current().record("max_scale", max_scale);
@@ -1080,7 +1129,7 @@ impl WayshotConnection {
                 )
                 .ok_or_else(|| {
                     tracing::error!("Provided capture region doesn't intersect with any outputs!");
-                    Error::NoOutputs
+                    WayshotError::NoOutputs
                 })?
         })
     }
@@ -1120,7 +1169,7 @@ impl WayshotConnection {
         cursor_overlay: bool,
     ) -> Result<DynamicImage> {
         if outputs.is_empty() {
-            return Err(Error::NoOutputs);
+            return Err(WayshotError::NoOutputs);
         }
 
         self.screenshot_region_capturer(RegionCapturer::Outputs(outputs.to_owned()), cursor_overlay)
@@ -1132,4 +1181,433 @@ impl WayshotConnection {
     }
 }
 
-pub mod ext_image_protocols;
+use wayland_protocols::ext::image_capture_source::v1::client::{
+    ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1,
+    ext_image_capture_source_v1::ExtImageCaptureSourceV1,
+};
+
+use wayland_client::protocol::{
+    wl_buffer::WlBuffer,
+    wl_output::{self},
+    wl_registry::{self},
+    wl_shm::Format,
+    wl_shm_pool::WlShmPool,
+};
+
+use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
+
+use image::ColorType;
+
+use std::os::fd::AsRawFd;
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use std::io;
+use thiserror::Error;
+use wayland_client::{
+    ConnectError, DispatchError,
+    globals::{BindError, GlobalError},
+};
+
+impl WayshotConnection {
+    /// get all outputs and their info
+    pub fn outputs(&self) -> &Vec<OutputInfo> {
+        &self.output_infos
+    }
+
+    pub(crate) fn take_event_queue(&mut self) -> EventQueue<Self> {
+        self.ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .event_queue
+            .take()
+            .expect("control your self")
+    }
+
+    pub(crate) fn output_image_manager(&self) -> &ExtOutputImageCaptureSourceManagerV1 {
+        self.ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .output_image_manager
+            .as_ref()
+            .expect("Should init")
+    }
+
+    pub(crate) fn image_copy_capture_manager(&self) -> &ExtImageCopyCaptureManagerV1 {
+        self.ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .img_copy_manager
+            .as_ref()
+            .expect("Should init")
+    }
+
+    pub(crate) fn qhandle(&self) -> &QueueHandle<Self> {
+        self.ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .qh
+            .as_ref()
+            .expect("Should init")
+    }
+
+    pub(crate) fn shm(&self) -> &WlShm {
+        self.ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .shm
+            .as_ref()
+            .expect("Should init")
+    }
+
+    pub(crate) fn reset_event_queue(&mut self, event_queue: EventQueue<Self>) {
+        self.ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .event_queue = Some(event_queue);
+    }
+
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
+    pub fn globals(&self) -> &GlobalList {
+        &self.globals
+    }
+
+    pub fn ext_new() -> std::result::Result<Self, WayshotError> {
+        Self::from_ext_connection(None)
+    }
+
+    fn from_ext_connection(
+        connection: Option<Connection>,
+    ) -> std::result::Result<Self, WayshotError> {
+        let conn = if let Some(conn) = connection {
+            conn
+        } else {
+            Connection::connect_to_env()?
+        };
+
+        let (globals, mut event_queue) = registry_queue_init::<WayshotConnection>(&conn)?;
+
+        // Create a new state with the base fields
+        let mut state = Self {
+            conn,
+            globals,
+            output_infos: Vec::new(),
+            dmabuf_state: None, // Initialize dmabuf_state as None
+            ext_image: Some(HaruhiShotBase {
+                toplevels: Vec::new(),
+                img_copy_manager: None,
+                output_image_manager: None,
+                shm: None,
+                qh: None,
+                event_queue: None,
+            }),
+        };
+
+        // First refresh outputs to populate the output_infos
+        state.refresh_outputs()?;
+
+        let qh = event_queue.handle();
+
+        // Now bind to globals after outputs are refreshed
+        let image_manager = state.globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
+        let output_image_manager = state.globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
+        let shm = state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
+        state.globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
+
+        // XDG output manager is already used in refresh_outputs, so we don't need to
+        // create it again and iterate through outputs here
+
+        event_queue.blocking_dispatch(&mut state)?;
+
+        // Store the globals we fetched
+        let ext_image = state
+            .ext_image
+            .as_mut()
+            .expect("ext_image should be initialized");
+        ext_image.img_copy_manager = Some(image_manager);
+        ext_image.output_image_manager = Some(output_image_manager);
+        ext_image.qh = Some(qh);
+        ext_image.shm = Some(shm);
+        ext_image.event_queue = Some(event_queue);
+
+        Ok(state)
+    }
+
+    /// Capture a single output
+    pub fn ext_capture_single_output(
+        &mut self,
+        option: CaptureOption,
+        output: OutputInfo,
+    ) -> std::result::Result<ImageViewInfo, WayshotError> {
+        let mem_fd = crate::ext_image_protocols::ext_create_shm_fd().unwrap();
+        let mem_file = File::from(mem_fd);
+        let crate::ext_image_protocols::CaptureOutputData {
+            width,
+            height,
+            frame_format,
+            ..
+        } = self.ext_capture_output_inner(
+            output.clone(),
+            option,
+            mem_file.as_fd(),
+            Some(&mem_file),
+        )?;
+
+        let mut frame_mmap = unsafe { MmapMut::map_mut(&mem_file).unwrap() };
+
+        let converter = crate::convert::create_converter(frame_format).unwrap();
+        let color_type = converter.convert_inplace(&mut frame_mmap);
+
+        // Create a full screen region representing the entire output
+        let region = output.logical_region.inner.clone();
+
+        Ok(ImageViewInfo {
+            data: frame_mmap.deref().into(),
+            width,
+            height,
+            color_type,
+            region,
+        })
+    }
+
+    fn ext_capture_output_inner<T: AsFd>(
+        &mut self,
+        OutputInfo {
+            output,
+            logical_region:
+                LogicalRegion {
+                    inner:
+                        Region {
+                            position: screen_position,
+                            size:
+                                Size {
+                                    width: real_width,
+                                    height: real_height,
+                                },
+                        },
+                },
+            //			logical_size:
+            //                Size {
+            //                    width: real_width,
+            //                    height: real_height,
+            //                },
+            //            position: screen_position,
+            ..
+        }: OutputInfo,
+        option: CaptureOption,
+        fd: T,
+        file: Option<&File>,
+    ) -> std::result::Result<crate::ext_image_protocols::CaptureOutputData, WayshotError> {
+        let mut event_queue = self.take_event_queue();
+        let img_manager = self.output_image_manager();
+        let capture_manager = self.image_copy_capture_manager();
+        let qh = self.qhandle();
+
+        let source = img_manager.create_source(&output, qh, ());
+        let info = Arc::new(RwLock::new(FrameInfo::default()));
+        let session = capture_manager.create_session(&source, option.into(), qh, info.clone());
+
+        let capture_info = CaptureInfo::new();
+        let frame = session.create_frame(qh, capture_info.clone());
+        event_queue.blocking_dispatch(self).unwrap();
+        let qh = self.qhandle();
+
+        let shm = self.shm();
+        let info = info.read().unwrap();
+
+        let Size { width, height } = info.size();
+        let WEnum::Value(frame_format) = info.format() else {
+            return Err(WayshotError::NotSupportFormat);
+        };
+        if !matches!(
+            frame_format,
+            Format::Xbgr2101010
+                | Format::Abgr2101010
+                | Format::Argb8888
+                | Format::Xrgb8888
+                | Format::Xbgr8888
+        ) {
+            return Err(WayshotError::NotSupportFormat);
+        }
+        let frame_bytes = 4 * height * width;
+        let mem_fd = fd.as_fd();
+
+        if let Some(file) = file {
+            file.set_len(frame_bytes as u64).unwrap();
+        }
+
+        let stride = 4 * width;
+
+        let shm_pool = shm.create_pool(mem_fd, (width * height * 4) as i32, qh, ());
+        let buffer = shm_pool.create_buffer(
+            0,
+            width as i32,
+            height as i32,
+            stride as i32,
+            frame_format,
+            qh,
+            (),
+        );
+        frame.attach_buffer(&buffer);
+        frame.capture();
+
+        let transform;
+        loop {
+            event_queue.blocking_dispatch(self)?;
+            let info = capture_info.read().unwrap();
+            match info.state() {
+                FrameState::Succeeded => {
+                    transform = info.transform();
+                    break;
+                }
+                FrameState::Failed(info) => match info {
+                    Some(WEnum::Value(reason)) => match reason {
+                        FailureReason::Stopped => {
+                            return Err(WayshotError::CaptureFailed("Stopped".to_owned()));
+                        }
+
+                        FailureReason::BufferConstraints => {
+                            return Err(WayshotError::CaptureFailed(
+                                "BufferConstraints".to_owned(),
+                            ));
+                        }
+                        FailureReason::Unknown | _ => {
+                            return Err(WayshotError::CaptureFailed("Unknown".to_owned()));
+                        }
+                    },
+                    Some(WEnum::Unknown(code)) => {
+                        return Err(WayshotError::CaptureFailed(format!(
+                            "Unknown reason, code : {code}"
+                        )));
+                    }
+                    None => {
+                        return Err(WayshotError::CaptureFailed(
+                            "No failure reason provided".to_owned(),
+                        ));
+                    }
+                },
+                FrameState::Pending => {}
+            }
+        }
+
+        self.reset_event_queue(event_queue);
+
+        Ok(crate::ext_image_protocols::CaptureOutputData {
+            output,
+            buffer,
+            width,
+            height,
+            frame_bytes,
+            stride,
+            frame_format,
+            real_width: real_width as u32,
+            real_height: real_height as u32,
+            transform,
+            screen_position,
+        })
+    }
+
+    pub fn ext_capture_area2<F>(
+        &mut self,
+        option: CaptureOption,
+        callback: F,
+    ) -> std::result::Result<ImageViewInfo, WayshotError>
+    where
+        F: AreaSelectCallback,
+    {
+        let outputs = self.outputs().clone();
+
+        let mut data_list = vec![];
+        for data in outputs.into_iter() {
+            let mem_fd = crate::ext_image_protocols::ext_create_shm_fd().unwrap();
+            let mem_file = File::from(mem_fd);
+            let data =
+                self.ext_capture_output_inner(data, option, mem_file.as_fd(), Some(&mem_file))?;
+            data_list.push(crate::ext_image_protocols::AreaShotInfo { data, mem_file })
+        }
+
+        let mut state = XdgShellState::new();
+        let mut event_queue: EventQueue<XdgShellState> = self.connection().new_event_queue();
+        let globals = self.globals();
+        let qh = event_queue.handle();
+
+        let compositor = globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ())?;
+        let xdg_wm_base = globals.bind::<XdgWmBase, _, _>(&qh, 1..=1, ())?;
+        let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ())?;
+
+        let mut xdg_surfaces: Vec<(WlSurface, XdgSurface, XdgToplevel)> =
+            Vec::with_capacity(data_list.len());
+        for crate::ext_image_protocols::AreaShotInfo { data, .. } in data_list.iter() {
+            let crate::ext_image_protocols::CaptureOutputData {
+                output,
+                buffer,
+                real_width,
+                real_height,
+                transform,
+                ..
+            } = data;
+            let surface = compositor.create_surface(&qh, ());
+
+            let xdg_surface = xdg_wm_base.get_xdg_surface(&surface, &qh, output.clone());
+            let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
+
+            // Configure the toplevel to be fullscreen on the specific output
+            xdg_toplevel.set_fullscreen(Some(output));
+            xdg_toplevel.set_title("wayshot-overlay".to_string());
+            xdg_toplevel.set_app_id("wayshot".to_string());
+
+            debug!("Committing surface creation changes.");
+            surface.commit();
+
+            debug!("Waiting for layer surface to be configured.");
+            while !state.configured_surfaces.contains(&xdg_surface) {
+                event_queue.blocking_dispatch(&mut state)?;
+            }
+
+            surface.set_buffer_transform(*transform);
+            // surface.set_buffer_scale(output_info.scale());
+            surface.attach(Some(buffer), 0, 0);
+
+            let viewport = viewporter.get_viewport(&surface, &qh, ());
+            viewport.set_destination(*real_width as i32, *real_height as i32);
+
+            debug!("Committing surface with attached buffer.");
+            surface.commit();
+            xdg_surfaces.push((surface, xdg_surface, xdg_toplevel));
+            event_queue.blocking_dispatch(&mut state)?;
+        }
+
+        let region_re = callback.slurp(self);
+
+        debug!("Unmapping and destroying layer shell surfaces.");
+        for (surface, xdg_surface, xdg_toplevel) in xdg_surfaces.iter() {
+            surface.attach(None, 0, 0);
+            surface.commit(); // unmap surface by committing a null buffer
+            xdg_toplevel.destroy();
+            xdg_surface.destroy();
+        }
+        event_queue.roundtrip(&mut state)?;
+        let region = region_re?;
+
+        let shotdata = data_list
+            .iter()
+            .find(|data| data.in_this_screen(region))
+            .ok_or(WayshotError::CaptureFailed("not in region".to_owned()))?;
+        let area = shotdata.clip_area(region).expect("should have");
+        let mut frame_mmap = unsafe { MmapMut::map_mut(&shotdata.mem_file).unwrap() };
+
+        let converter = crate::convert::create_converter(shotdata.data.frame_format).unwrap();
+        let color_type = converter.convert_inplace(&mut frame_mmap);
+
+        Ok(ImageViewInfo {
+            data: frame_mmap.deref().into(),
+            width: shotdata.data.width,
+            height: shotdata.data.height,
+            color_type,
+            region: area,
+        })
+    }
+}

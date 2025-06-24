@@ -1,9 +1,16 @@
 use image::{GenericImageView, ImageEncoder, ImageError};
 use std::{env, fs, path::PathBuf};
 
+use crate::utils::waysip_to_region;
 use dialoguer::FuzzySelect;
 use dialoguer::theme::ColorfulTheme;
-use libwayshot::ext_image_protocols::HaruhiShotState;
+use libwayshot::WayshotConnection;
+
+const TMP: &str = "/tmp";
+
+use libwayshot::ext_image_protocols::CaptureOption;
+use libwayshot::ext_image_protocols::ImageViewInfo;
+use libwayshot::region::{Position, Region, Size};
 
 #[derive(Debug, Clone)]
 pub enum WayshotResult {
@@ -27,7 +34,7 @@ pub enum WayshotImageWriteError {
     #[error("Output not exist")]
     OutputNotExist,
     #[error("Wayland shot error")]
-    WaylandError(#[from] libwayshot::ext_image_protocols::HaruhiError),
+    WaylandError(#[from] libwayshot::error::WayshotError),
 }
 
 pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>) {
@@ -63,7 +70,7 @@ pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>)
 }
 
 pub fn ext_capture_output(
-    state: &mut HaruhiShotState,
+    state: &mut WayshotConnection,
     output: Option<String>,
     use_stdout: bool,
     pointer: bool,
@@ -89,8 +96,6 @@ pub fn ext_capture_output(
     write_to_image(image_info, use_stdout)
 }
 
-use libwayshot::ext_image_protocols::{CaptureOption, ImageInfo};
-
 trait ToCaptureOption {
     fn to_capture_option(self) -> CaptureOption;
 }
@@ -106,7 +111,7 @@ impl ToCaptureOption for bool {
 }
 
 fn write_to_image(
-    image_info: ImageInfo,
+    image_info: ImageViewInfo,
     use_stdout: bool,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     if use_stdout {
@@ -120,12 +125,13 @@ use image::codecs::png::PngEncoder;
 use std::io::{BufWriter, Write, stdout};
 
 fn write_to_stdout(
-    ImageInfo {
+    ImageViewInfo {
         data,
         width,
         height,
         color_type,
-    }: ImageInfo,
+        ..
+    }: ImageViewInfo,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let stdout = stdout();
     let mut writer = BufWriter::new(stdout.lock());
@@ -134,12 +140,13 @@ fn write_to_stdout(
 }
 
 fn write_to_file(
-    ImageInfo {
+    ImageViewInfo {
         data,
         width,
         height,
         color_type,
-    }: ImageInfo,
+        ..
+    }: ImageViewInfo,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let file = random_file_path();
     let mut writer =
@@ -173,30 +180,22 @@ pub static SAVEPATH: LazyLock<PathBuf> = LazyLock::new(|| {
     targetpath
 });
 
-const TMP: &str = "/tmp";
-
-use libwayshot::ext_image_protocols::ImageViewInfo;
-use libwayshot::ext_image_protocols::{Position, Region, Size};
-
 pub fn ext_capture_area(
-    state: &mut HaruhiShotState,
+    state: &mut WayshotConnection,
     use_stdout: bool,
     pointer: bool,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let ImageViewInfo {
-        info:
-            ImageInfo {
-                data,
-                width: img_width,
-                height: img_height,
-                color_type,
-            },
+        data,
+        width: img_width,
+        height: img_height,
+        color_type,
         region:
             Region {
                 position: Position { x, y },
                 size: Size { width, height },
             },
-    } = state.ext_capture_area(pointer.to_capture_option(), |w_conn: &HaruhiShotState| {
+    } = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
                 connection: w_conn.connection(),
@@ -204,11 +203,14 @@ pub fn ext_capture_area(
             }),
             libwaysip::SelectionType::Area,
         )
-        .map_err(|e| libwayshot::ext_image_protocols::HaruhiError::CaptureFailed(e.to_string()))?
-        .ok_or(libwayshot::ext_image_protocols::HaruhiError::CaptureFailed(
+        .map_err(|e| libwayshot::error::WayshotError::CaptureFailed(e.to_string()))?
+        .ok_or(libwayshot::error::WayshotError::CaptureFailed(
             "Failed to capture the area".to_string(),
         ))?;
+
+        // Map the Result<LogicalRegion> directly to Result<Region>
         waysip_to_region(info.size(), info.left_top_point())
+            .map(|logical_region| logical_region.inner)
     })?;
 
     let mut buff = std::io::Cursor::new(Vec::new());
@@ -232,64 +234,50 @@ pub fn ext_capture_area(
     }
 }
 
-pub fn waysip_to_region(
-	size: libwaysip::Size,
-	point: libwaysip::Position,
-) -> Result<Region, libwayshot::ext_image_protocols::HaruhiError> {
-	let size: Size = Size {
-		width: size.width,
-		height: size.height,
-	};
-	let position: Position = Position {
-		x: point.x,
-		y: point.y,
-	};
+pub fn ext_capture_color(
+    state: &mut WayshotConnection,
+) -> Result<WayshotResult, WayshotImageWriteError> {
+    let ImageViewInfo {
+        data,
+        width: img_width,
+        height: img_height,
+        color_type,
+        region:
+            Region {
+                position: Position { x, y },
+                size: Size { width, height },
+            },
+    } = state.ext_capture_area2(CaptureOption::None, |w_conn: &WayshotConnection| {
+        let info = libwaysip::get_area(
+            Some(libwaysip::WaysipConnection {
+                connection: w_conn.connection(),
+                globals: w_conn.globals(),
+            }),
+            libwaysip::SelectionType::Point,
+        )
+        .map_err(|e| libwayshot::error::WayshotError::CaptureFailed(e.to_string()))?
+        .ok_or(libwayshot::error::WayshotError::CaptureFailed(
+            "Failed to capture the area".to_string(),
+        ))?;
 
-	Ok(Region { position, size })
-}
+        // Map the Result<LogicalRegion> directly to Result<Region>
+        waysip_to_region(info.size(), info.left_top_point())
+            .map(|logical_region| logical_region.inner)
+    })?;
 
-pub fn ext_capture_color(state: &mut HaruhiShotState) -> Result<WayshotResult, WayshotImageWriteError> {
-	let ImageViewInfo {
-		info:
-		ImageInfo {
-			data,
-			width: img_width,
-			height: img_height,
-			color_type,
-		},
-		region:
-		Region {
-			position: Position { x, y },
-			size: Size { width, height },
-		},
-	} = state.ext_capture_area(CaptureOption::None, |w_conn: &HaruhiShotState| {
-		let info = libwaysip::get_area(
-			Some(libwaysip::WaysipConnection {
-				connection: w_conn.connection(),
-				globals: w_conn.globals(),
-			}),
-			libwaysip::SelectionType::Point,
-		)
-			.map_err(|e| libwayshot::ext_image_protocols::HaruhiError::CaptureFailed(e.to_string()))?
-			.ok_or(libwayshot::ext_image_protocols::HaruhiError::CaptureFailed(
-				"Failed to capture the area".to_string(),
-			))?;
-		waysip_to_region(info.size(), info.left_top_point())
-	})?;
+    let mut buff = std::io::Cursor::new(Vec::new());
+    PngEncoder::new(&mut buff).write_image(&data, img_width, img_height, color_type.into())?;
+    let img = image::load_from_memory_with_format(buff.get_ref(), image::ImageFormat::Png).unwrap();
 
-	let mut buff = std::io::Cursor::new(Vec::new());
-	PngEncoder::new(&mut buff).write_image(&data, img_width, img_height, color_type.into())?;
-	let img = image::load_from_memory_with_format(buff.get_ref(), image::ImageFormat::Png).unwrap();
-
-	let clipimage = img.view(x as u32, y as u32, width as u32, height as u32);
-	let pixel = clipimage.get_pixel(0, 0);
-	println!(
-		"RGB: R:{}, G:{}, B:{}, A:{}",
-		pixel.0[0], pixel.0[1], pixel.0[2], pixel[3]
-	);
-	println!(
-		"16hex: #{:02x}{:02x}{:02x}{:02x}",
-		pixel.0[0], pixel.0[1], pixel.0[2], pixel[3]
-	);
-	Ok(WayshotResult::ColorSucceeded)
+    let clipimage = img.view(x as u32, y as u32, width as u32, height as u32);
+    let pixel = clipimage.get_pixel(0, 0);
+    println!(
+        "RGB: R:{}, G:{}, B:{}, A:{}",
+        pixel.0[0], pixel.0[1], pixel.0[2], pixel[3]
+    );
+    println!(
+        "16hex: #{:02x}{:02x}{:02x}{:02x}",
+        pixel.0[0], pixel.0[1], pixel.0[2], pixel[3]
+    );
+    Ok(WayshotResult::ColorSucceeded)
 }

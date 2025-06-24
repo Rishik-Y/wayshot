@@ -13,13 +13,16 @@ use chrono::Local;
 use libwayshot::Result;
 use libwayshot::region::{LogicalRegion, Position, Region, Size};
 
-pub fn waysip_to_region(size: libwaysip::Size, point: libwaysip::Position) -> Result<LogicalRegion> {
+pub fn waysip_to_region(
+    size: libwaysip::Size,
+    point: libwaysip::Position,
+) -> Result<LogicalRegion> {
     let size: Size = Size {
         width: size.width.try_into().map_err(|_| {
-            libwayshot::Error::FreezeCallbackError("width cannot be negative".to_string())
+            libwayshot::WayshotError::FreezeCallbackError("width cannot be negative".to_string())
         })?,
         height: size.height.try_into().map_err(|_| {
-            libwayshot::Error::FreezeCallbackError("height cannot be negative".to_string())
+            libwayshot::WayshotError::FreezeCallbackError("height cannot be negative".to_string())
         })?,
     };
     let position: Position = Position {

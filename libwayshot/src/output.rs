@@ -1,20 +1,22 @@
+use crate::region::{LogicalRegion, Position, Size};
 use std::fmt::Display;
-
+use std::sync::OnceLock;
 use wayland_client::protocol::{wl_output, wl_output::WlOutput};
-
-use crate::region::{LogicalRegion, Size};
+use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_v1::ZxdgOutputV1;
 
 /// Represents an accessible wayland output.
 ///
 /// Do not instantiate, instead use [`crate::WayshotConnection::get_all_outputs`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OutputInfo {
-    pub wl_output: WlOutput,
+    pub output: WlOutput,
     pub name: String,
     pub description: String,
     pub transform: wl_output::Transform,
     pub physical_size: Size,
     pub logical_region: LogicalRegion,
+    pub xdg_output: Option<ZxdgOutputV1>,
+    pub scale: i32,
 }
 
 impl Display for OutputInfo {
@@ -29,7 +31,8 @@ impl Display for OutputInfo {
 }
 
 impl OutputInfo {
-    pub(crate) fn scale(&self) -> f64 {
-        self.physical_size.height as f64 / self.logical_region.inner.size.height as f64
+    /// The name of the output or maybe the screen?
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
