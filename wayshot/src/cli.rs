@@ -42,9 +42,9 @@ pub struct Cli {
     #[arg(short, long)]
     pub geometry: bool,
 
-    /// For ext-image-protocols
-    #[arg(short, long)]
-    pub experimental: bool,
+    /// Get color of a perticular pixel at the given coordinates
+    #[arg(long, conflicts_with_all = ["geometry", "cursor"] )]
+    pub color: bool,
 
     /// list all details of valid outouts
     #[arg(long, alias = "list-outputs-info")]
