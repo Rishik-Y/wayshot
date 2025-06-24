@@ -207,7 +207,9 @@ pub fn ext_capture_area(
         .ok_or(libwayshot::error::WayshotError::CaptureFailed(
             "Failed to capture the area".to_string(),
         ))?;
-        waysip_to_region2(info.size(), info.left_top_point())
+        
+        // Map the Result<LogicalRegion> directly to Result<Region>
+        waysip_to_region(info.size(), info.left_top_point()).map(|logical_region| logical_region.inner)
     })?;
 
     let mut buff = std::io::Cursor::new(Vec::new());
@@ -229,22 +231,6 @@ pub fn ext_capture_area(
         clipimage.to_image().save(&file)?;
         Ok(WayshotResult::SaveToFile(file))
     }
-}
-
-pub fn waysip_to_region2(
-    size: libwaysip::Size,
-    point: libwaysip::Position,
-) -> Result<Region, libwayshot::error::WayshotError> {
-    let size: Size = Size {
-        width: size.width as u32,
-        height: size.height as u32,
-    };
-    let position: Position = Position {
-        x: point.x,
-        y: point.y,
-    };
-
-    Ok(Region { position, size })
 }
 
 pub fn ext_capture_color(
@@ -272,7 +258,9 @@ pub fn ext_capture_color(
         .ok_or(libwayshot::error::WayshotError::CaptureFailed(
             "Failed to capture the area".to_string(),
         ))?;
-        waysip_to_region2(info.size(), info.left_top_point())
+        
+        // Map the Result<LogicalRegion> directly to Result<Region>
+        waysip_to_region(info.size(), info.left_top_point()).map(|logical_region| logical_region.inner)
     })?;
 
     let mut buff = std::io::Cursor::new(Vec::new());
