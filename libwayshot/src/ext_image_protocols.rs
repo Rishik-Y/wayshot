@@ -1,22 +1,15 @@
-use wayland_client::{EventQueue, WEnum};
-use wayland_protocols::ext::image_copy_capture::v1::client::{
-    ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
-};
+use wayland_client::WEnum;
 
-use wayland_protocols::ext::image_capture_source::v1::client::{
-    ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1,
-};
 
 use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
     ext_foreign_toplevel_handle_v1::{ExtForeignToplevelHandleV1},
 };
 
 use wayland_client::{
- QueueHandle, 
     protocol::{
         wl_buffer::WlBuffer,
         wl_output::{self, WlOutput},
-        wl_shm::{Format, WlShm},
+        wl_shm::Format,
     },
 };
 
@@ -225,16 +218,6 @@ impl AreaShotInfo {
             },
         })
     }
-}
-
-#[derive(Debug)]
-pub struct ExtBase<T> {
-    pub toplevels: Vec<TopLevel>,
-    pub img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
-    pub output_image_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
-    pub shm: Option<WlShm>,
-    pub qh: Option<QueueHandle<T>>,
-    pub event_queue: Option<EventQueue<T>>,
 }
 
 use nix::{

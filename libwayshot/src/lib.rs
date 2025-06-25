@@ -67,7 +67,7 @@ pub mod reexport {
     use wayland_client::protocol::wl_output;
     pub use wl_output::{Transform, WlOutput};
 }
-use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, FrameInfo, ExtBase, ImageViewInfo};
+use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, FrameInfo, ImageViewInfo, TopLevel};
 use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 use wayland_backend::protocol::WEnum;
 use wayland_client::protocol::wl_surface::WlSurface;
@@ -88,6 +88,16 @@ use crate::region::Region;
 /// let wayshot_connection = WayshotConnection::new()?;
 /// let image_buffer = wayshot_connection.screenshot_all()?;
 /// ```
+
+#[derive(Debug)]
+pub struct ExtBase<T> {
+	pub toplevels: Vec<TopLevel>,
+	pub img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
+	pub output_image_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
+	pub shm: Option<WlShm>,
+	pub qh: Option<QueueHandle<T>>,
+	pub event_queue: Option<EventQueue<T>>,
+}
 
 #[derive(Debug)]
 pub struct WayshotConnection {
