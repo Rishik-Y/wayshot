@@ -1267,15 +1267,6 @@ impl WayshotConnection {
             .expect("Should init")
     }
 
-    pub(crate) fn qhandle(&self) -> &QueueHandle<Self> {
-        self.ext_image
-            .as_ref()
-            .expect("ext_image should be initialized")
-            .qh
-            .as_ref()
-            .expect("Should init")
-    }
-
     pub(crate) fn shm(&self) -> &WlShm {
         self.ext_image
             .as_ref()
@@ -1382,8 +1373,13 @@ impl WayshotConnection {
 			.as_ref()
 			.expect("Should init");
         let capture_manager = self.image_copy_capture_manager();
-        let qh = self.qhandle();
-
+        let qh = self
+			.ext_image
+			.as_ref()
+			.expect("ext_image should be initialized")
+			.qh
+			.as_ref()
+			.expect("Should init");
         let source = img_manager.create_source(&output, qh, ());
         let info = Arc::new(RwLock::new(FrameInfo::default()));
         let session = capture_manager.create_session(&source, option.into(), qh, info.clone());
@@ -1391,8 +1387,13 @@ impl WayshotConnection {
         let capture_info = CaptureInfo::new();
         let frame = session.create_frame(qh, capture_info.clone());
         event_queue.blocking_dispatch(self).unwrap();
-        let qh = self.qhandle();
-
+        let qh = self
+			.ext_image
+			.as_ref()
+			.expect("ext_image should be initialized")
+			.qh
+			.as_ref()
+			.expect("Should init");
         let shm = self.shm();
         let info = info.read().unwrap();
 
