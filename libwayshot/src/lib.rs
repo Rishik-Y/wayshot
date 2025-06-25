@@ -109,11 +109,22 @@ pub struct WayshotConnection {
 }
 
 impl WayshotConnection {
-    pub fn new() -> Result<
-        Self, //, HaruhiError
-    > {
-        Self::from_connection(None)
-    }
+	pub fn new() -> Result<
+		Self, //, HaruhiError
+	> {
+		// Try to use ext_image protocol first
+		match Self::from_ext_connection(None) {
+			Ok(connection) => {
+				tracing::debug!("Successfully created connection with ext_image protocol");
+				Ok(connection)
+			},
+			Err(err) => {
+				tracing::debug!("ext_image protocol not available ({}), falling back to wlr_screencopy", err);
+				// Fall back to wlr_screencopy
+				Self::from_connection(None)
+			}
+		}
+	}
 
     /// Recommended if you already have a [`wayland_client::Connection`].
     pub fn from_connection(connection: Option<Connection>) -> Result<Self> {
@@ -1183,7 +1194,6 @@ impl WayshotConnection {
 }
 
 use wayland_client::protocol::{
-    wl_buffer::WlBuffer,
     wl_output::{self},
     wl_registry::{self},
     wl_shm::Format,
@@ -1254,10 +1264,6 @@ impl WayshotConnection {
 
     pub fn globals(&self) -> &GlobalList {
         &self.globals
-    }
-
-    pub fn ext_new() -> std::result::Result<Self, WayshotError> {
-        Self::from_ext_connection(None)
     }
 
     fn from_ext_connection(

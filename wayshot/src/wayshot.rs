@@ -109,126 +109,133 @@ fn main() -> Result<()> {
 
     let output = cli.output.or(base.output);
 
-    let testing = true; // Set to true for testing purposes, can be removed later
-    if testing {
-        // Try to use ext_image_* protocol first
-        if let Ok(mut state) = libwayshot::WayshotConnection::ext_new() {
-            // Using ext_image_* protocol
-            if cli.list_outputs {
-                let outputs = state.outputs();
-                let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
-                for output_name in names {
-                    println!("{}", output_name);
+    // Create WayshotConnection (will automatically use ext_image protocol if available)
+    let connection_result = libwayshot::WayshotConnection::new();
+	
+	let testing = true;  // Change to false to force wlr_screencopy
+    
+    match connection_result {
+        Ok(mut state) => {
+            // If we have a connection, check if it has ext_image capability
+            let has_ext_image = state.ext_image.is_some();
+            
+            if has_ext_image && testing {
+                tracing::info!("Using ext_image protocol");
+                
+                if cli.list_outputs {
+                    let outputs = state.outputs();
+                    let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
+                    for output_name in names {
+                        println!("{}", output_name);
+                    }
+                    return Ok(());
                 }
+
+                let result = if cli.geometry {
+                    ext_capture_area(&mut state, stdout_print, cursor)
+                } else if cli.color {
+                    ext_capture_color(&mut state)
+                } else if cli.experimental {
+                    let frames = 20;
+                    let delay_ms = 1;
+                    // Use streaming capture for experimental mode with frames parameter
+                    ext_streaming_capture(&mut state, output, frames, delay_ms, cursor)
+                } else {
+                    ext_capture_output(&mut state, output, stdout_print, cursor)
+                };
+
+                notify_result(result);
                 return Ok(());
-            }
-
-            let result = if cli.geometry {
-                ext_capture_area(&mut state, stdout_print, cursor)
-            } else if cli.color {
-				ext_capture_color(&mut state)
-			} else if cli.experimental {
-				let frames = 20;
-				let delay_ms = 1;
-				// Use streaming capture for experimental mode with frames parameter
-				ext_streaming_capture(&mut state, output, frames, delay_ms, cursor)
-			} else {
-                ext_capture_output(&mut state, output, stdout_print, cursor)
-            };
-
-            println!("Ext_image protocol result: {:?}", result);
-            notify_result(result);
-            return Ok(());
-        }
-    } else {
-        // Fallback to wlr_screencopy if ext_image_* protocol isn't available
-        tracing::info!("ext_image protocol not available, falling back to wlr_screencopy");
-
-        let wayshot_conn = libwayshot::WayshotConnection::new()?;
-
-        let stdout = io::stdout();
-        let mut writer = BufWriter::new(stdout.lock());
-
-        if cli.list_outputs {
-            let valid_outputs = wayshot_conn.get_all_outputs();
-            for output in valid_outputs {
-                writeln!(writer, "{}", output.name)?;
-            }
-
-            writer.flush()?;
-
-            return Ok(());
-        }
-
-        if cli.list_outputs_info {
-            wayshot_conn.print_displays_info();
-            return Ok(());
-        }
-
-        let image_buffer = if cli.geometry {
-            wayshot_conn.screenshot_freeze(
-                |w_conn| {
-                    let info = libwaysip::get_area(
-                        Some(libwaysip::WaysipConnection {
-                            connection: &w_conn.conn,
-                            globals: &w_conn.globals,
-                        }),
-                        libwaysip::SelectionType::Area,
-                    )
-                    .map_err(|e| libwayshot::WayshotError::FreezeCallbackError(e.to_string()))?
-                    .ok_or(libwayshot::WayshotError::FreezeCallbackError(
-                        "Failed to capture the area".to_string(),
-                    ))?;
-                    utils::waysip_to_region(info.size(), info.left_top_point())
-                },
-                cursor,
-            )?
-        } else if let Some(output_name) = output {
-            let outputs = wayshot_conn.get_all_outputs();
-            if let Some(output) = outputs.iter().find(|output| output.name == output_name) {
-                wayshot_conn.screenshot_single_output(output, cursor)?
             } else {
-                bail!("No output found!");
-            }
-        } else if cli.choose_output {
-            let outputs = wayshot_conn.get_all_outputs();
-            let output_names: Vec<&str> = outputs
-                .iter()
-                .map(|display| display.name.as_str())
-                .collect();
-            if let Some(index) = select_output(&output_names) {
-                wayshot_conn.screenshot_single_output(&outputs[index], cursor)?
-            } else {
-                bail!("No output found!");
-            }
-        } else {
-            wayshot_conn.screenshot_all(cursor)?
-        };
+                tracing::info!("ext_image protocol not available, using wlr_screencopy");
+                
+                let stdout = io::stdout();
+                let mut writer = BufWriter::new(stdout.lock());
 
-        let mut image_buf: Option<Cursor<Vec<u8>>> = None;
-        if let Some(f) = file {
-            if let Err(e) = image_buffer.save(&f) {
-                tracing::error!("Failed to save file '{}': {}", f.display(), e);
-                // Optionally, notify the user or handle the error as needed
-            }
-        }
+                if cli.list_outputs {
+                    let valid_outputs = state.get_all_outputs();
+                    for output in valid_outputs {
+                        writeln!(writer, "{}", output.name)?;
+                    }
+                    writer.flush()?;
+                    return Ok(());
+                }
 
-        if stdout_print {
-            let mut buffer = Cursor::new(Vec::new());
-            image_buffer.write_to(&mut buffer, encoding.into())?;
-            writer.write_all(buffer.get_ref())?;
-            image_buf = Some(buffer);
-        }
+                if cli.list_outputs_info {
+                    state.print_displays_info();
+                    return Ok(());
+                }
 
-        if clipboard {
-            clipboard_daemonize(match image_buf {
-                Some(buf) => buf,
-                None => {
+                let image_buffer = if cli.geometry {
+                    state.screenshot_freeze(
+                        |w_conn| {
+                            let info = libwaysip::get_area(
+                                Some(libwaysip::WaysipConnection {
+                                    connection: &w_conn.conn,
+                                    globals: &w_conn.globals,
+                                }),
+                                libwaysip::SelectionType::Area,
+                            )
+                            .map_err(|e| libwayshot::WayshotError::FreezeCallbackError(e.to_string()))?
+                            .ok_or(libwayshot::WayshotError::FreezeCallbackError(
+                                "Failed to capture the area".to_string(),
+                            ))?;
+                            utils::waysip_to_region(info.size(), info.left_top_point())
+                        },
+                        cursor,
+                    )?
+                } else if let Some(output_name) = output {
+                    let outputs = state.get_all_outputs();
+                    if let Some(output) = outputs.iter().find(|output| output.name == output_name) {
+                        state.screenshot_single_output(output, cursor)?
+                    } else {
+                        bail!("No output found!");
+                    }
+                } else if cli.choose_output {
+                    let outputs = state.get_all_outputs();
+                    let output_names: Vec<&str> = outputs
+                        .iter()
+                        .map(|display| display.name.as_str())
+                        .collect();
+                    if let Some(index) = select_output(&output_names) {
+                        state.screenshot_single_output(&outputs[index], cursor)?
+                    } else {
+                        bail!("No output found!");
+                    }
+                } else {
+                    state.screenshot_all(cursor)?
+                };
+
+                let mut image_buf: Option<Cursor<Vec<u8>>> = None;
+                if let Some(f) = file {
+                    if let Err(e) = image_buffer.save(&f) {
+                        tracing::error!("Failed to save file '{}': {}", f.display(), e);
+                        // Optionally, notify the user or handle the error as needed
+                    }
+                }
+
+                if stdout_print {
                     let mut buffer = Cursor::new(Vec::new());
                     image_buffer.write_to(&mut buffer, encoding.into())?;
-                    buffer
+                    writer.write_all(buffer.get_ref())?;
+                    image_buf = Some(buffer);
                 }
-            })?;
+
+                if clipboard {
+                    clipboard_daemonize(match image_buf {
+                        Some(buf) => buf,
+                        None => {
+                            let mut buffer = Cursor::new(Vec::new());
+                            image_buffer.write_to(&mut buffer, encoding.into())?;
+                            buffer
+                        }
+                    })?;
+                }
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to create WayshotConnection: {}", e);
+            bail!("Could not establish connection to Wayland compositor");
         }
     }
 
