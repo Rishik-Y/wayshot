@@ -91,12 +91,12 @@ use crate::region::Region;
 
 #[derive(Debug)]
 pub struct ExtBase<T> {
-	pub toplevels: Vec<TopLevel>,
-	pub img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
-	pub output_image_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
-	pub shm: Option<WlShm>,
-	pub qh: Option<QueueHandle<T>>,
-	pub event_queue: Option<EventQueue<T>>,
+    pub toplevels: Vec<TopLevel>,
+    pub img_copy_manager: Option<ExtImageCopyCaptureManagerV1>,
+    pub output_image_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
+    pub shm: Option<WlShm>,
+    pub qh: Option<QueueHandle<T>>,
+    pub event_queue: Option<EventQueue<T>>,
 }
 
 #[derive(Debug)]
@@ -109,36 +109,41 @@ pub struct WayshotConnection {
 }
 
 impl WayshotConnection {
-	pub fn new() -> Result<
-		Self, //, HaruhiError
-	> {
-		// Try to use ext_image protocol first
-		match
-		Self::create_connection(None, true) {
-			Ok(connection) => {
-				tracing::debug!("Successfully created connection with ext_image protocol");
-				Ok(connection)
-			},
-			Err(err) => {
-				tracing::debug!("ext_image protocol not available ({}), falling back to wlr-screencopy", err);
-				// Fall back to wlr_screencopy
-				Self::create_connection(None, false)
-			}
-		}
-	}
-	
-	/// Recommended if you already have a [`wayland_client::Connection`].
+    pub fn new() -> Result<
+        Self, //, HaruhiError
+    > {
+        // Try to use ext_image protocol first
+        match Self::create_connection(None, true) {
+            Ok(connection) => {
+                tracing::debug!("Successfully created connection with ext_image protocol");
+                Ok(connection)
+            }
+            Err(err) => {
+                tracing::debug!(
+                    "ext_image protocol not available ({}), falling back to wlr-screencopy",
+                    err
+                );
+                // Fall back to wlr_screencopy
+                Self::create_connection(None, false)
+            }
+        }
+    }
+
+    /// Recommended if you already have a [`wayland_client::Connection`].
     /// Internal function that handles connection creation with protocol selection
-    fn create_connection(connection: Option<Connection>, use_ext_image: bool) -> Result<Self, WayshotError> {
+    fn create_connection(
+        connection: Option<Connection>,
+        use_ext_image: bool,
+    ) -> Result<Self, WayshotError> {
         let conn = if let Some(conn) = connection {
             conn
         } else {
             Connection::connect_to_env()?
         };
-		
-		let (globals, mut event_queue) = registry_queue_init::<WayshotConnection>(&conn)?;
 
-		// Create a base WayshotConnection with common fields
+        let (globals, mut event_queue) = registry_queue_init::<WayshotConnection>(&conn)?;
+
+        // Create a base WayshotConnection with common fields
         let mut initial_state = Self {
             conn,
             globals,
@@ -160,24 +165,32 @@ impl WayshotConnection {
 
         // Refresh outputs which is needed for both protocols
         initial_state.refresh_outputs()?;
-        
+
         // If using ext_image protocol, initialize the specific components
         if use_ext_image {
             let qh = event_queue.handle();
-            
+
             // Bind to ext_image specific globals
-            match initial_state.globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ()) {
+            match initial_state
+                .globals
+                .bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())
+            {
                 Ok(image_manager) => {
-                    match initial_state.globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ()) {
+                    match initial_state
+                        .globals
+                        .bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())
+                    {
                         Ok(output_image_manager) => {
                             match initial_state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ()) {
                                 Ok(shm) => {
                                     // Try to bind to toplevel list, but don't fail if not available
-                                    let _ = initial_state.globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ());
-                                    
+                                    let _ = initial_state
+                                        .globals
+                                        .bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ());
+
                                     // Process events to ensure all bound globals are initialized
                                     event_queue.blocking_dispatch(&mut initial_state)?;
-                                    
+
                                     // Store the globals we fetched
                                     if let Some(ext_image) = initial_state.ext_image.as_mut() {
                                         ext_image.img_copy_manager = Some(image_manager);
@@ -186,14 +199,26 @@ impl WayshotConnection {
                                         ext_image.shm = Some(shm);
                                         ext_image.event_queue = Some(event_queue);
                                     }
-                                },
-                                Err(_) => return Err(WayshotError::ProtocolNotFound("WlShm not found".to_string())),
+                                }
+                                Err(_) => {
+                                    return Err(WayshotError::ProtocolNotFound(
+                                        "WlShm not found".to_string(),
+                                    ));
+                                }
                             }
-                        },
-                        Err(_) => return Err(WayshotError::ProtocolNotFound("ExtOutputImageCaptureSourceManagerV1 not found".to_string())),
+                        }
+                        Err(_) => {
+                            return Err(WayshotError::ProtocolNotFound(
+                                "ExtOutputImageCaptureSourceManagerV1 not found".to_string(),
+                            ));
+                        }
                     }
-                },
-                Err(_) => return Err(WayshotError::ProtocolNotFound("ExtImageCopyCaptureManagerV1 not found".to_string())),
+                }
+                Err(_) => {
+                    return Err(WayshotError::ProtocolNotFound(
+                        "ExtImageCopyCaptureManagerV1 not found".to_string(),
+                    ));
+                }
             }
         }
 
@@ -262,9 +287,7 @@ impl WayshotConnection {
             .outputs
             .iter()
             .enumerate()
-            .map(|(index, output)| {
-                zxdg_output_manager.get_xdg_output(&output.output, &qh, index)
-            })
+            .map(|(index, output)| zxdg_output_manager.get_xdg_output(&output.output, &qh, index))
             .collect();
 
         event_queue.roundtrip(&mut state)?;
@@ -989,10 +1012,7 @@ impl WayshotConnection {
             }
         };
 
-        let viewporter = self
-            .globals
-            .bind::<WpViewporter, _, _>(&qh, 1..=1, ())
-            .ok();
+        let viewporter = self.globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
         if viewporter.is_none() {
             tracing::info!(
                 "Compositor does not support wp_viewporter, display scaling may be inaccurate."
@@ -1349,34 +1369,34 @@ impl WayshotConnection {
         fd: T,
         file: Option<&File>,
     ) -> std::result::Result<crate::ext_image_protocols::CaptureOutputData, WayshotError> {
-		let mut event_queue = self
-			.ext_image
-			.as_mut()
-			.expect("ext_image should be initialized")
-			.event_queue
-			.take()
-			.expect("Control your self");
-		let img_manager = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.output_image_manager
-			.as_ref()
-			.expect("Should init");
+        let mut event_queue = self
+            .ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .event_queue
+            .take()
+            .expect("Control your self");
+        let img_manager = self
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .output_image_manager
+            .as_ref()
+            .expect("Should init");
         let capture_manager = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.img_copy_manager
-			.as_ref()
-			.expect("Should init");
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .img_copy_manager
+            .as_ref()
+            .expect("Should init");
         let qh = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.qh
-			.as_ref()
-			.expect("Should init");
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .qh
+            .as_ref()
+            .expect("Should init");
         let source = img_manager.create_source(&output, qh, ());
         let info = Arc::new(RwLock::new(FrameInfo::default()));
         let session = capture_manager.create_session(&source, option.into(), qh, info.clone());
@@ -1385,12 +1405,12 @@ impl WayshotConnection {
         let frame = session.create_frame(qh, capture_info.clone());
         event_queue.blocking_dispatch(self).unwrap();
         let qh = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.qh
-			.as_ref()
-			.expect("Should init");
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .qh
+            .as_ref()
+            .expect("Should init");
         let shm = self.shm();
         let info = info.read().unwrap();
 
@@ -1588,11 +1608,6 @@ impl WayshotConnection {
     }
 }
 
-
-
-
-
-
 impl WayshotConnection {
     /// Creates a StreamingCaptureContext for efficient continuous capture of an output
     ///
@@ -1606,31 +1621,47 @@ impl WayshotConnection {
     ///
     /// # Returns
     /// A `StreamingCaptureContext` that can be used with `capture_frame_with_context`
-    pub fn create_streaming_context(&mut self, option: CaptureOption, output: OutputInfo) -> Result<crate::ext_image_protocols::StreamingCaptureContext, WayshotError> {
+    pub fn create_streaming_context(
+        &mut self,
+        option: CaptureOption,
+        output: OutputInfo,
+    ) -> Result<crate::ext_image_protocols::StreamingCaptureContext, WayshotError> {
         // Create resources that will be reused across multiple captures
         let mem_fd = crate::ext_image_protocols::ext_create_shm_fd().unwrap();
         let mem_file = File::from(mem_fd);
 
         // Take ownership of components rather than borrowing self in multiple ways
         let mut event_queue = self
-			.ext_image
-			.as_mut()
-			.expect("ext_image should be initialized")
-			.event_queue
-			.take()
-			.expect("Control your self");
+            .ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .event_queue
+            .take()
+            .expect("Control your self");
         let qh = {
-            let ext_image = self.ext_image.as_ref().expect("ext_image should be initialized");
+            let ext_image = self
+                .ext_image
+                .as_ref()
+                .expect("ext_image should be initialized");
             ext_image.qh.as_ref().expect("Should init").clone()
         };
 
         let img_manager = {
-            let ext_image = self.ext_image.as_ref().expect("ext_image should be initialized");
-            ext_image.output_image_manager.as_ref().expect("Should init")
+            let ext_image = self
+                .ext_image
+                .as_ref()
+                .expect("ext_image should be initialized");
+            ext_image
+                .output_image_manager
+                .as_ref()
+                .expect("Should init")
         };
 
         let capture_manager = {
-            let ext_image = self.ext_image.as_ref().expect("ext_image should be initialized");
+            let ext_image = self
+                .ext_image
+                .as_ref()
+                .expect("ext_image should be initialized");
             ext_image.img_copy_manager.as_ref().expect("Should init")
         };
 
@@ -1678,7 +1709,10 @@ impl WayshotConnection {
 
         // Create buffer resources
         let shm = {
-            let ext_image = self.ext_image.as_ref().expect("ext_image should be initialized");
+            let ext_image = self
+                .ext_image
+                .as_ref()
+                .expect("ext_image should be initialized");
             ext_image.shm.as_ref().expect("Should init")
         };
 
@@ -1723,23 +1757,35 @@ impl WayshotConnection {
     ///
     /// # Returns
     /// The captured frame as an ImageViewInfo
-    pub fn capture_frame_with_context(&mut self, context: &mut crate::ext_image_protocols::StreamingCaptureContext) -> Result<ImageViewInfo, WayshotError> {
+    pub fn capture_frame_with_context(
+        &mut self,
+        context: &mut crate::ext_image_protocols::StreamingCaptureContext,
+    ) -> Result<ImageViewInfo, WayshotError> {
         // Take ownership of components rather than borrowing self in multiple ways
-        let mut event_queue = self			
-			.ext_image
-			.as_mut()
-			.expect("ext_image should be initialized")
-			.event_queue
-			.take()
-			.expect("Control your self");
+        let mut event_queue = self
+            .ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .event_queue
+            .take()
+            .expect("Control your self");
         let qh = {
-            let ext_image = self.ext_image.as_ref().expect("ext_image should be initialized");
+            let ext_image = self
+                .ext_image
+                .as_ref()
+                .expect("ext_image should be initialized");
             ext_image.qh.as_ref().expect("Should init").clone()
         };
 
         // Use existing resources from the context
-        let session = context.session.as_ref().expect("Session should be initialized in context");
-        let buffer = context.buffer.as_ref().expect("Buffer should be initialized in context");
+        let session = context
+            .session
+            .as_ref()
+            .expect("Session should be initialized in context");
+        let buffer = context
+            .buffer
+            .as_ref()
+            .expect("Buffer should be initialized in context");
 
         // Create a capture info for this frame
         let capture_info = CaptureInfo::new();
@@ -1799,7 +1845,10 @@ impl WayshotConnection {
         self.reset_event_queue(event_queue);
 
         // Get image data from memory file
-        let mem_file = context.mem_file.as_ref().expect("Memory file should be initialized in context");
+        let mem_file = context
+            .mem_file
+            .as_ref()
+            .expect("Memory file should be initialized in context");
         let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(mem_file).unwrap() };
 
         // Process the image data
@@ -1829,7 +1878,10 @@ impl WayshotConnection {
     ///
     /// # Parameters
     /// - `context`: The StreamingCaptureContext to release
-    pub fn release_streaming_context(&mut self, context: &mut crate::ext_image_protocols::StreamingCaptureContext) {
+    pub fn release_streaming_context(
+        &mut self,
+        context: &mut crate::ext_image_protocols::StreamingCaptureContext,
+    ) {
         // Release frame if it exists
         if let Some(frame) = context.frame.take() {
             frame.destroy();
@@ -1851,4 +1903,3 @@ impl WayshotConnection {
         context.mem_file = None;
     }
 }
-

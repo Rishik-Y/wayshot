@@ -282,11 +282,6 @@ pub fn ext_capture_color(
     Ok(WayshotResult::ColorSucceeded)
 }
 
-
-
-
-
-
 pub fn ext_streaming_capture(
     state: &mut WayshotConnection,
     output_name: Option<String>,
@@ -312,24 +307,27 @@ pub fn ext_streaming_capture(
 
     let output = outputs[selection].clone();
     let option = pointer.to_capture_option();
-    
+
     // Create streaming context (initialize once)
     let mut context = state.create_streaming_context(option, output.clone())?;
-    
-    println!("Starting streaming capture: {} frames with {}ms delay", frames, delay_ms);
-    
+
+    println!(
+        "Starting streaming capture: {} frames with {}ms delay",
+        frames, delay_ms
+    );
+
     // Capture multiple frames
     for i in 0..frames {
         // Capture frame using the context
         let image_info = state.capture_frame_with_context(&mut context)?;
-        
+
         // Save the frame
         let file_path = streaming_file_path(i);
-        let writer = std::fs::File::create(&file_path)
-            .map_err(WayshotImageWriteError::FileCreatedFailed)?;
-            
+        let writer =
+            std::fs::File::create(&file_path).map_err(WayshotImageWriteError::FileCreatedFailed)?;
+
         let mut writer = std::io::BufWriter::new(writer);
-        
+
         image::codecs::png::PngEncoder::new(&mut writer).write_image(
             &image_info.data,
             image_info.width,
@@ -337,7 +335,12 @@ pub fn ext_streaming_capture(
             image_info.color_type.into(),
         )?;
 
-        println!("Captured frame {}/{}: {}", i + 1, frames, file_path.display());
+        println!(
+            "Captured frame {}/{}: {}",
+            i + 1,
+            frames,
+            file_path.display()
+        );
 
         // Wait before capturing next frame
         if i < frames - 1 && delay_ms > 0 {
@@ -358,11 +361,6 @@ fn streaming_file_path(frame_number: u32) -> PathBuf {
         .unwrap()
         .as_secs();
 
-    let file_name = format!(
-        "{}-streaming-{:04}.png",
-        timestamp,
-        frame_number
-    );
+    let file_name = format!("{}-streaming-{:04}.png", timestamp, frame_number);
     SAVEPATH.join(file_name)
 }
-

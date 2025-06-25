@@ -32,11 +32,9 @@ use wayland_protocols::{
         zxdg_output_v1::{self, ZxdgOutputV1},
     },
 };
-use wayland_protocols_wlr::{
-    screencopy::v1::client::{
-        zwlr_screencopy_frame_v1::{self, ZwlrScreencopyFrameV1},
-        zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
-    },
+use wayland_protocols_wlr::screencopy::v1::client::{
+    zwlr_screencopy_frame_v1::{self, ZwlrScreencopyFrameV1},
+    zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
 use crate::{
@@ -329,7 +327,7 @@ pub(crate) struct DMABUFState {
 // Replace the layer shell imports with xdg_shell imports
 use wayland_protocols::xdg::shell::client::{
     xdg_surface::{self, XdgSurface},
-    xdg_toplevel::{XdgToplevel},
+    xdg_toplevel::XdgToplevel,
     xdg_wm_base::{self, XdgWmBase},
 };
 
@@ -413,14 +411,12 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
     ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
 };
 
-use wayland_client::{
-    event_created_child,
-};
+use wayland_client::event_created_child;
 
 use std::sync::{Arc, RwLock};
 
-use crate::ext_image_protocols::{CaptureInfo, FrameInfo, TopLevel};
-use crate::{WayshotConnection}; // Add this import
+use crate::WayshotConnection;
+use crate::ext_image_protocols::{CaptureInfo, FrameInfo, TopLevel}; // Add this import
 
 delegate_noop!(WayshotConnection: ignore ExtImageCaptureSourceV1);
 delegate_noop!(WayshotConnection: ignore ExtOutputImageCaptureSourceManagerV1);

@@ -1,23 +1,16 @@
 use wayland_client::WEnum;
 
+use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1;
 
-use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
-    ext_foreign_toplevel_handle_v1::{ExtForeignToplevelHandleV1},
-};
-
-use wayland_client::{
-    protocol::{
-        wl_buffer::WlBuffer,
-        wl_output::{self, WlOutput},
-        wl_shm::Format,
-    },
+use wayland_client::protocol::{
+    wl_buffer::WlBuffer,
+    wl_output::{self, WlOutput},
+    wl_shm::Format,
 };
 
 use std::sync::{Arc, RwLock};
 
-use wayland_protocols::{
-    ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options,
-};
+use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
 
 use image::ColorType;
 
@@ -28,18 +21,17 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use std::{ os::fd::OwnedFd};
+use std::os::fd::OwnedFd;
 
+use crate::WayshotConnection;
+use crate::WayshotError; // Removed WayshotBase import
 use crate::dispatch::FrameState;
 use crate::region::{Position, Region, Size};
-use crate::WayshotError; // Removed WayshotBase import
-use crate::WayshotConnection;
-
 
 use nix::{
-	fcntl,
-	sys::{memfd, mman, stat},
-	unistd,
+    fcntl,
+    sys::{memfd, mman, stat},
+    unistd,
 };
 
 /// Import required for StreamingCaptureContext
@@ -299,9 +291,6 @@ pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
         }
     }
 }
-
-
-
 
 /// Provides a reusable context for streaming captures without recreating resources
 ///

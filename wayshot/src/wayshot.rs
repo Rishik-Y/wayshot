@@ -112,7 +112,7 @@ fn main() -> Result<()> {
     // Create WayshotConnection (will automatically use ext_image protocol if available)
     let connection_result = libwayshot::WayshotConnection::new();
 
-	let testing = false;  // Change to false to force wlr_screencopy
+    let testing = false; // Change to false to force wlr_screencopy
 
     match connection_result {
         Ok(mut state) => {
@@ -176,10 +176,14 @@ fn main() -> Result<()> {
                                 }),
                                 libwaysip::SelectionType::Area,
                             )
-                            .map_err(|e| libwayshot::WayshotError::FreezeCallbackError(e.to_string()))?
-                            .ok_or(libwayshot::WayshotError::FreezeCallbackError(
-                                "Failed to capture the area".to_string(),
-                            ))?;
+                            .map_err(|e| {
+                                libwayshot::WayshotError::FreezeCallbackError(e.to_string())
+                            })?
+                            .ok_or(
+                                libwayshot::WayshotError::FreezeCallbackError(
+                                    "Failed to capture the area".to_string(),
+                                ),
+                            )?;
                             utils::waysip_to_region(info.size(), info.left_top_point())
                         },
                         cursor,
@@ -232,7 +236,7 @@ fn main() -> Result<()> {
                     })?;
                 }
             }
-        },
+        }
         Err(e) => {
             tracing::error!("Failed to create WayshotConnection: {}", e);
             bail!("Could not establish connection to Wayland compositor");
