@@ -1254,7 +1254,7 @@ use wayland_client::protocol::{
 
 impl WayshotConnection {
     /// get all outputs and their info
-    pub fn outputs(&self) -> &Vec<OutputInfo> {
+    pub fn vector_of_Outputs(&self) -> &Vec<OutputInfo> {
         &self.output_infos
     }
 
@@ -1502,7 +1502,7 @@ impl WayshotConnection {
     where
         F: AreaSelectCallback,
     {
-        let outputs = self.outputs().clone();
+        let outputs = self.vector_of_Outputs().clone();
 
         let mut data_list = vec![];
         for data in outputs.into_iter() {

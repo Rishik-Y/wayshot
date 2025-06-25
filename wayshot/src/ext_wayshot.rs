@@ -75,7 +75,7 @@ pub fn ext_capture_output(
     use_stdout: bool,
     pointer: bool,
 ) -> eyre::Result<WayshotResult, WayshotImageWriteError> {
-    let outputs = state.outputs();
+    let outputs = state.vector_of_Outputs();
     let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
 
     let selection = match output {
@@ -295,7 +295,7 @@ pub fn ext_streaming_capture(
     pointer: bool,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     // Select output
-    let outputs = state.outputs();
+    let outputs = state.vector_of_Outputs();
     let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
 
     let selection = match output_name {

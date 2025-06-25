@@ -111,19 +111,19 @@ fn main() -> Result<()> {
 
     // Create WayshotConnection (will automatically use ext_image protocol if available)
     let connection_result = libwayshot::WayshotConnection::new();
-	
-	let testing = true;  // Change to false to force wlr_screencopy
-    
+
+	let testing = false;  // Change to false to force wlr_screencopy
+
     match connection_result {
         Ok(mut state) => {
             // If we have a connection, check if it has ext_image capability
             let has_ext_image = state.ext_image.is_some();
-            
+
             if has_ext_image && testing {
                 tracing::info!("Using ext_image protocol");
-                
+
                 if cli.list_outputs {
-                    let outputs = state.outputs();
+                    let outputs = state.vector_of_Outputs();
                     let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
                     for output_name in names {
                         println!("{}", output_name);
@@ -148,7 +148,7 @@ fn main() -> Result<()> {
                 return Ok(());
             } else {
                 tracing::info!("ext_image protocol not available, using wlr_screencopy");
-                
+
                 let stdout = io::stdout();
                 let mut writer = BufWriter::new(stdout.lock());
 
