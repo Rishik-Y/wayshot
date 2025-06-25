@@ -35,6 +35,16 @@ use crate::region::{Position, Region, Size};
 use crate::WayshotError; // Removed WayshotBase import
 use crate::WayshotConnection;
 
+
+use nix::{
+	fcntl,
+	sys::{memfd, mman, stat},
+	unistd,
+};
+
+/// Import required for StreamingCaptureContext
+use crate::output::OutputInfo;
+
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
 /// and when you do area screenshot, This lib will also provide you with the view of the selected
@@ -220,12 +230,6 @@ impl AreaShotInfo {
     }
 }
 
-use nix::{
-    fcntl,
-    sys::{memfd, mman, stat},
-    unistd,
-};
-
 /// capture_output_frame.
 pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
     // Only try memfd on linux and freebsd.
@@ -294,4 +298,28 @@ pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
             Err(errno) => return Err(std::io::Error::from(errno)),
         }
     }
+}
+
+
+
+
+/// Provides a reusable context for streaming captures without recreating resources
+///
+/// This struct holds all necessary resources for capturing frames in a streaming
+/// context, allowing efficient capture of multiple frames without recreating
+/// Wayland protocol handles between frames.
+#[derive(Debug)]
+pub struct StreamingCaptureContext {
+	pub(crate) source: Option<wayland_protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1>,
+	pub(crate) session: Option<wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1>,
+	pub(crate) frame: Option<wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1>,
+	pub(crate) buffer: Option<WlBuffer>,
+	pub(crate) shm_pool: Option<wayland_client::protocol::wl_shm_pool::WlShmPool>,
+	pub(crate) mem_file: Option<File>,
+	pub(crate) width: u32,
+	pub(crate) height: u32,
+	pub(crate) stride: u32,
+	pub(crate) frame_format: Format,
+	pub(crate) output: OutputInfo,
+	pub(crate) option: CaptureOption,
 }
