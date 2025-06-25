@@ -1258,15 +1258,6 @@ impl WayshotConnection {
         &self.output_infos
     }
 
-    pub(crate) fn output_image_manager(&self) -> &ExtOutputImageCaptureSourceManagerV1 {
-        self.ext_image
-            .as_ref()
-            .expect("ext_image should be initialized")
-            .output_image_manager
-            .as_ref()
-            .expect("Should init")
-    }
-
     pub(crate) fn image_copy_capture_manager(&self) -> &ExtImageCopyCaptureManagerV1 {
         self.ext_image
             .as_ref()
@@ -1383,7 +1374,13 @@ impl WayshotConnection {
 			.event_queue
 			.take()
 			.expect("Control your self");
-		let img_manager = self.output_image_manager();
+		let img_manager = self
+			.ext_image
+			.as_ref()
+			.expect("ext_image should be initialized")
+			.output_image_manager
+			.as_ref()
+			.expect("Should init");
         let capture_manager = self.image_copy_capture_manager();
         let qh = self.qhandle();
 
