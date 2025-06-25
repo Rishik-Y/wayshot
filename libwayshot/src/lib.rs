@@ -1285,10 +1285,6 @@ impl WayshotConnection {
             .event_queue = Some(event_queue);
     }
 
-    pub fn connection(&self) -> &Connection {
-        &self.conn
-    }
-
     pub fn globals(&self) -> &GlobalList {
         &self.globals
     }
@@ -1523,7 +1519,7 @@ impl WayshotConnection {
         }
 
         let mut state = XdgShellState::new();
-        let mut event_queue: EventQueue<XdgShellState> = self.connection().new_event_queue();
+        let mut event_queue: EventQueue<XdgShellState> = self.conn.new_event_queue();
         let globals = self.globals();
         let qh = event_queue.handle();
 

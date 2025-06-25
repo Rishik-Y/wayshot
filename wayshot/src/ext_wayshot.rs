@@ -198,7 +198,7 @@ pub fn ext_capture_area(
     } = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
-                connection: w_conn.connection(),
+                connection: &w_conn.conn,
                 globals: w_conn.globals(),
             }),
             libwaysip::SelectionType::Area,
@@ -250,7 +250,7 @@ pub fn ext_capture_color(
     } = state.ext_capture_area2(CaptureOption::None, |w_conn: &WayshotConnection| {
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
-                connection: w_conn.connection(),
+                connection: &w_conn.conn,
                 globals: w_conn.globals(),
             }),
             libwaysip::SelectionType::Point,
