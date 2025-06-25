@@ -336,18 +336,18 @@ pub fn ext_streaming_capture(
             image_info.height,
             image_info.color_type.into(),
         )?;
-        
+
         println!("Captured frame {}/{}: {}", i + 1, frames, file_path.display());
-        
+
         // Wait before capturing next frame
         if i < frames - 1 && delay_ms > 0 {
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         }
     }
-    
+
     // Release resources when done
     state.release_streaming_context(&mut context);
-    
+
     println!("Streaming capture completed successfully");
     Ok(WayshotResult::StdoutSucceeded)
 }
@@ -357,7 +357,7 @@ fn streaming_file_path(frame_number: u32) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-        
+
     let file_name = format!(
         "{}-streaming-{:04}.png",
         timestamp,
@@ -365,3 +365,4 @@ fn streaming_file_path(frame_number: u32) -> PathBuf {
     );
     SAVEPATH.join(file_name)
 }
+
