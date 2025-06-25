@@ -1278,15 +1278,6 @@ impl WayshotConnection {
         &self.output_infos
     }
 
-    pub(crate) fn shm(&self) -> &WlShm {
-        self.ext_image
-            .as_ref()
-            .expect("ext_image should be initialized")
-            .shm
-            .as_ref()
-            .expect("Should init")
-    }
-
     pub(crate) fn reset_event_queue(&mut self, event_queue: EventQueue<Self>) {
         self.ext_image
             .as_mut()
@@ -1411,7 +1402,13 @@ impl WayshotConnection {
             .qh
             .as_ref()
             .expect("Should init");
-        let shm = self.shm();
+        let shm = self
+			.ext_image
+			.as_ref()
+			.expect("ext_image should be initialized")
+			.shm
+			.as_ref()
+			.expect("Should init");
         let info = info.read().unwrap();
 
         let Size { width, height } = info.size();
