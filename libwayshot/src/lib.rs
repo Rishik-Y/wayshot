@@ -1284,10 +1284,6 @@ impl WayshotConnection {
             .expect("ext_image should be initialized")
             .event_queue = Some(event_queue);
     }
-
-    pub fn globals(&self) -> &GlobalList {
-        &self.globals
-    }
 }
 
 impl WayshotConnection {
@@ -1520,7 +1516,7 @@ impl WayshotConnection {
 
         let mut state = XdgShellState::new();
         let mut event_queue: EventQueue<XdgShellState> = self.conn.new_event_queue();
-        let globals = self.globals();
+        let globals = &self.globals;
         let qh = event_queue.handle();
 
         let compositor = globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ())?;

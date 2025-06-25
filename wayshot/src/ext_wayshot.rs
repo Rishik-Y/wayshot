@@ -199,7 +199,7 @@ pub fn ext_capture_area(
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
                 connection: &w_conn.conn,
-                globals: w_conn.globals(),
+                globals: &w_conn.globals,
             }),
             libwaysip::SelectionType::Area,
         )
@@ -251,7 +251,7 @@ pub fn ext_capture_color(
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
                 connection: &w_conn.conn,
-                globals: w_conn.globals(),
+                globals: &w_conn.globals,
             }),
             libwaysip::SelectionType::Point,
         )
