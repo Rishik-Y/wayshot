@@ -21,7 +21,6 @@ use screencopy::{DMAFrameFormat, DMAFrameGuard, EGLImageGuard, FrameData, FrameG
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 use std::{
-    collections::HashSet,
     ffi::c_void,
     fs::File,
     os::fd::{AsFd, IntoRawFd, OwnedFd},
@@ -30,7 +29,7 @@ use std::{
 };
 use tracing::debug;
 use wayland_client::{
-    Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop, event_created_child,
+    Connection, EventQueue, Proxy, QueueHandle,
     globals::{GlobalList, registry_queue_init},
     protocol::{
         wl_compositor::WlCompositor,
@@ -68,20 +67,14 @@ pub mod reexport {
     use wayland_client::protocol::wl_output;
     pub use wl_output::{Transform, WlOutput};
 }
-use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, FrameInfo, ExtBase, ImageViewInfo, TopLevel};
+use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, FrameInfo, ExtBase, ImageViewInfo};
 use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 use wayland_backend::protocol::WEnum;
-use wayland_client::globals::GlobalListContents;
-use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_surface::WlSurface;
-use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1;
-use wayland_protocols::ext::foreign_toplevel_list::v1::client::{ext_foreign_toplevel_handle_v1, ext_foreign_toplevel_list_v1};
 use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
 use wayland_protocols::ext::image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1;
-use wayland_protocols::ext::image_copy_capture::v1::client::{ext_image_copy_capture_frame_v1, ext_image_copy_capture_session_v1};
-use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::{ExtImageCopyCaptureFrameV1, FailureReason};
+use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason;
 use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
-use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1;
 use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
 use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
@@ -1179,32 +1172,12 @@ impl WayshotConnection {
     }
 }
 
-use wayland_protocols::ext::image_capture_source::v1::client::{
-    ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1,
-    ext_image_capture_source_v1::ExtImageCaptureSourceV1,
-};
-
 use wayland_client::protocol::{
     wl_buffer::WlBuffer,
     wl_output::{self},
     wl_registry::{self},
     wl_shm::Format,
     wl_shm_pool::WlShmPool,
-};
-
-use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
-
-use image::ColorType;
-
-use std::os::fd::AsRawFd;
-
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use std::io;
-use thiserror::Error;
-use wayland_client::{
-    ConnectError, DispatchError,
-    globals::{BindError, GlobalError},
 };
 
 impl WayshotConnection {
@@ -1578,7 +1551,7 @@ impl WayshotConnection {
             event_queue.blocking_dispatch(&mut state)?;
         }
 
-        let region_re = callback.slurp(self);
+        let region_re = callback.Screenshot(self);
 
         debug!("Unmapping and destroying layer shell surfaces.");
         for (surface, xdg_surface, xdg_toplevel) in xdg_surfaces.iter() {

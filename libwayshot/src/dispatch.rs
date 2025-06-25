@@ -33,10 +33,6 @@ use wayland_protocols::{
     },
 };
 use wayland_protocols_wlr::{
-    layer_shell::v1::client::{
-        zwlr_layer_shell_v1::ZwlrLayerShellV1,
-        zwlr_layer_surface_v1::{self, ZwlrLayerSurfaceV1},
-    },
     screencopy::v1::client::{
         zwlr_screencopy_frame_v1::{self, ZwlrScreencopyFrameV1},
         zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
@@ -333,7 +329,7 @@ pub(crate) struct DMABUFState {
 // Replace the layer shell imports with xdg_shell imports
 use wayland_protocols::xdg::shell::client::{
     xdg_surface::{self, XdgSurface},
-    xdg_toplevel::{self, XdgToplevel},
+    xdg_toplevel::{XdgToplevel},
     xdg_wm_base::{self, XdgWmBase},
 };
 
@@ -406,8 +402,6 @@ use wayland_protocols::ext::image_copy_capture::v1::client::{
     ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
 };
 
-use tracing::debug;
-
 use wayland_protocols::ext::image_capture_source::v1::client::{
     ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1,
     ext_image_capture_source_v1::ExtImageCaptureSourceV1,
@@ -421,34 +415,12 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
 
 use wayland_client::{
     event_created_child,
-    globals::{GlobalList, registry_queue_init},
 };
 
 use std::sync::{Arc, RwLock};
 
-use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
-
-use image::ColorType;
-use memmap2::MmapMut;
-
-use std::os::fd::AsRawFd;
-
-use std::{
-    fs::File,
-    time::{SystemTime, UNIX_EPOCH},
-};
-
-use std::{ops::Deref, os::fd::OwnedFd};
-
-use std::io;
-use thiserror::Error;
-use wayland_client::{
-    ConnectError, DispatchError,
-    globals::{BindError, GlobalError},
-};
-
 use crate::ext_image_protocols::{CaptureInfo, FrameInfo, TopLevel};
-use crate::{WayshotConnection, WayshotError}; // Add this import
+use crate::{WayshotConnection}; // Add this import
 
 delegate_noop!(WayshotConnection: ignore ExtImageCaptureSourceV1);
 delegate_noop!(WayshotConnection: ignore ExtOutputImageCaptureSourceManagerV1);

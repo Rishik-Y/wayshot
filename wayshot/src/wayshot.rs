@@ -109,7 +109,7 @@ fn main() -> Result<()> {
 
     let output = cli.output.or(base.output);
 
-    let testing = false; // Set to true for testing purposes, can be removed later
+    let testing = true; // Set to true for testing purposes, can be removed later
     if testing {
         // Try to use ext_image_* protocol first
         if let Ok(mut state) = libwayshot::WayshotConnection::ext_new() {
@@ -127,7 +127,7 @@ fn main() -> Result<()> {
                 ext_capture_area(&mut state, stdout_print, cursor)
             } else if cli.color {
                 ext_capture_color(&mut state)
-            } else {
+			} else {
                 ext_capture_output(&mut state, output, stdout_print, cursor)
             };
 

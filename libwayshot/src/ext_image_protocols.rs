@@ -1,58 +1,32 @@
 use wayland_client::{EventQueue, WEnum};
 use wayland_protocols::ext::image_copy_capture::v1::client::{
-    ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1, FailureReason},
     ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
-    ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
 };
 
-use tracing::debug;
-
 use wayland_protocols::ext::image_capture_source::v1::client::{
-    ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1,
-    ext_image_capture_source_v1::ExtImageCaptureSourceV1,
     ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1,
 };
 
 use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
-    ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
-    ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
+    ext_foreign_toplevel_handle_v1::{ExtForeignToplevelHandleV1},
 };
 
 use wayland_client::{
-    Connection, Dispatch, Proxy, QueueHandle, delegate_noop, event_created_child,
-    globals::{GlobalList, GlobalListContents, registry_queue_init},
+ QueueHandle, 
     protocol::{
         wl_buffer::WlBuffer,
         wl_output::{self, WlOutput},
-        wl_registry::{self, WlRegistry},
         wl_shm::{Format, WlShm},
-        wl_shm_pool::WlShmPool,
     },
-};
-
-use wayland_client::protocol::{wl_compositor::WlCompositor, wl_surface::WlSurface};
-
-use wayland_protocols::xdg::xdg_output::zv1::client::{
-    zxdg_output_manager_v1::ZxdgOutputManagerV1,
-    zxdg_output_v1::{self, ZxdgOutputV1},
 };
 
 use std::sync::{Arc, RwLock};
 
-// Replace the layer shell imports with xdg_shell imports
-use wayland_protocols::xdg::shell::client::{
-    xdg_surface::{self, XdgSurface},
-    xdg_toplevel::{self, XdgToplevel},
-    xdg_wm_base::{self, XdgWmBase},
-};
-
 use wayland_protocols::{
     ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options,
-    wp::viewporter::client::wp_viewporter::WpViewporter,
 };
 
 use image::ColorType;
-use memmap2::MmapMut;
 
 use std::os::fd::{AsFd, AsRawFd};
 
@@ -61,18 +35,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use std::{ops::Deref, os::fd::OwnedFd};
+use std::{ os::fd::OwnedFd};
 
-use std::io;
-use thiserror::Error;
-use wayland_client::{
-    ConnectError, DispatchError,
-    globals::{BindError, GlobalError},
-};
-
-use crate::dispatch::{DMABUFState, FrameState, OutputCaptureState, XdgShellState};
-use crate::output::OutputInfo;
-use crate::region::{LogicalRegion, Position, Region, Size};
+use crate::dispatch::FrameState;
+use crate::region::{Position, Region, Size};
 use crate::WayshotError; // Removed WayshotBase import
 use crate::WayshotConnection;
 
@@ -166,24 +132,22 @@ impl CaptureInfo {
 }
 
 pub trait AreaSelectCallback {
-    fn slurp(self, state: &WayshotConnection) -> Result<Region, WayshotError>;
+    fn Screenshot(self, state: &WayshotConnection) -> Result<Region, WayshotError>;
 }
 
 impl<F> AreaSelectCallback for F
 where
     F: Fn(&WayshotConnection) -> Result<Region, WayshotError>,
 {
-    fn slurp(self, state: &WayshotConnection) -> Result<Region, WayshotError> {
+    fn Screenshot(self, state: &WayshotConnection) -> Result<Region, WayshotError> {
         self(state)
     }
 }
 impl AreaSelectCallback for Region {
-    fn slurp(self, _state: &WayshotConnection) -> Result<Region, WayshotError> {
+    fn Screenshot(self, _state: &WayshotConnection) -> Result<Region, WayshotError> {
         Ok(self)
     }
 }
-
-use std::collections::HashSet;
 
 /// Describe the capture option
 /// Now this library provide two options
