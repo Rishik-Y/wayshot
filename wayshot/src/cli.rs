@@ -50,6 +50,10 @@ pub struct Cli {
     #[arg(long, alias = "list-outputs-info")]
     pub list_outputs_info: bool,
 
+	/// Enable streaming
+	#[arg(short, long)]
+	pub experimental: bool,
+
     /// Enable cursor in screenshots
     #[arg(short, long)]
     pub cursor: bool,
