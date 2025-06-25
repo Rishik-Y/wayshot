@@ -113,37 +113,89 @@ impl WayshotConnection {
 		Self, //, HaruhiError
 	> {
 		// Try to use ext_image protocol first
-		match Self::from_ext_connection(None) {
+		match
+		Self::create_connection(None, true) {
 			Ok(connection) => {
 				tracing::debug!("Successfully created connection with ext_image protocol");
 				Ok(connection)
 			},
 			Err(err) => {
-				tracing::debug!("ext_image protocol not available ({}), falling back to wlr_screencopy", err);
+				tracing::debug!("ext_image protocol not available ({}), falling back to wlr-screencopy", err);
 				// Fall back to wlr_screencopy
-				Self::from_connection(None)
+				Self::create_connection(None, false)
 			}
 		}
 	}
-
-    /// Recommended if you already have a [`wayland_client::Connection`].
-    pub fn from_connection(connection: Option<Connection>) -> Result<Self> {
+	
+	/// Recommended if you already have a [`wayland_client::Connection`].
+    /// Internal function that handles connection creation with protocol selection
+    fn create_connection(connection: Option<Connection>, use_ext_image: bool) -> Result<Self, WayshotError> {
         let conn = if let Some(conn) = connection {
             conn
         } else {
             Connection::connect_to_env()?
         };
-        let (globals, mut event_queue) = registry_queue_init::<WayshotState>(&conn)?;
+		
+		let (globals, mut event_queue) = registry_queue_init::<WayshotConnection>(&conn)?;
 
+		// Create a base WayshotConnection with common fields
         let mut initial_state = Self {
             conn,
             globals,
             output_infos: Vec::new(),
             dmabuf_state: None,
-            ext_image: None,
+            ext_image: if use_ext_image {
+                Some(ExtBase {
+                    toplevels: Vec::new(),
+                    img_copy_manager: None,
+                    output_image_manager: None,
+                    shm: None,
+                    qh: None,
+                    event_queue: None,
+                })
+            } else {
+                None
+            },
         };
 
+        // Refresh outputs which is needed for both protocols
         initial_state.refresh_outputs()?;
+        
+        // If using ext_image protocol, initialize the specific components
+        if use_ext_image {
+            let qh = event_queue.handle();
+            
+            // Bind to ext_image specific globals
+            match initial_state.globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ()) {
+                Ok(image_manager) => {
+                    match initial_state.globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ()) {
+                        Ok(output_image_manager) => {
+                            match initial_state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ()) {
+                                Ok(shm) => {
+                                    // Try to bind to toplevel list, but don't fail if not available
+                                    let _ = initial_state.globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ());
+                                    
+                                    // Process events to ensure all bound globals are initialized
+                                    event_queue.blocking_dispatch(&mut initial_state)?;
+                                    
+                                    // Store the globals we fetched
+                                    if let Some(ext_image) = initial_state.ext_image.as_mut() {
+                                        ext_image.img_copy_manager = Some(image_manager);
+                                        ext_image.output_image_manager = Some(output_image_manager);
+                                        ext_image.qh = Some(qh);
+                                        ext_image.shm = Some(shm);
+                                        ext_image.event_queue = Some(event_queue);
+                                    }
+                                },
+                                Err(_) => return Err(WayshotError::ProtocolNotFound("WlShm not found".to_string())),
+                            }
+                        },
+                        Err(_) => return Err(WayshotError::ProtocolNotFound("ExtOutputImageCaptureSourceManagerV1 not found".to_string())),
+                    }
+                },
+                Err(_) => return Err(WayshotError::ProtocolNotFound("ExtImageCopyCaptureManagerV1 not found".to_string())),
+            }
+        }
 
         Ok(initial_state)
     }
@@ -1265,64 +1317,9 @@ impl WayshotConnection {
     pub fn globals(&self) -> &GlobalList {
         &self.globals
     }
+}
 
-    fn from_ext_connection(
-        connection: Option<Connection>,
-    ) -> std::result::Result<Self, WayshotError> {
-        let conn = if let Some(conn) = connection {
-            conn
-        } else {
-            Connection::connect_to_env()?
-        };
-
-        let (globals, mut event_queue) = registry_queue_init::<WayshotConnection>(&conn)?;
-
-        // Create a new state with the base fields
-        let mut state = Self {
-            conn,
-            globals,
-            output_infos: Vec::new(),
-            dmabuf_state: None, // Initialize dmabuf_state as None
-            ext_image: Some(ExtBase {
-                toplevels: Vec::new(),
-                img_copy_manager: None,
-                output_image_manager: None,
-                shm: None,
-                qh: None,
-                event_queue: None,
-            }),
-        };
-
-        // First refresh outputs to populate the output_infos
-        state.refresh_outputs()?;
-
-        let qh = event_queue.handle();
-
-        // Now bind to globals after outputs are refreshed
-        let image_manager = state.globals.bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())?;
-        let output_image_manager = state.globals.bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())?;
-        let shm = state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ())?;
-        state.globals.bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ())?;
-
-        // XDG output manager is already used in refresh_outputs, so we don't need to
-        // create it again and iterate through outputs here
-
-        event_queue.blocking_dispatch(&mut state)?;
-
-        // Store the globals we fetched
-        let ext_image = state
-            .ext_image
-            .as_mut()
-            .expect("ext_image should be initialized");
-        ext_image.img_copy_manager = Some(image_manager);
-        ext_image.output_image_manager = Some(output_image_manager);
-        ext_image.qh = Some(qh);
-        ext_image.shm = Some(shm);
-        ext_image.event_queue = Some(event_queue);
-
-        Ok(state)
-    }
-
+impl WayshotConnection {
     /// Capture a single output
     pub fn ext_capture_single_output(
         &mut self,
