@@ -1258,15 +1258,6 @@ impl WayshotConnection {
         &self.output_infos
     }
 
-    pub(crate) fn take_event_queue(&mut self) -> EventQueue<Self> {
-        self.ext_image
-            .as_mut()
-            .expect("ext_image should be initialized")
-            .event_queue
-            .take()
-            .expect("control your self")
-    }
-
     pub(crate) fn output_image_manager(&self) -> &ExtOutputImageCaptureSourceManagerV1 {
         self.ext_image
             .as_ref()
@@ -1385,8 +1376,14 @@ impl WayshotConnection {
         fd: T,
         file: Option<&File>,
     ) -> std::result::Result<crate::ext_image_protocols::CaptureOutputData, WayshotError> {
-        let mut event_queue = self.take_event_queue();
-        let img_manager = self.output_image_manager();
+		let mut event_queue = self
+			.ext_image
+			.as_mut()
+			.expect("ext_image should be initialized")
+			.event_queue
+			.take()
+			.expect("Control your self");
+		let img_manager = self.output_image_manager();
         let capture_manager = self.image_copy_capture_manager();
         let qh = self.qhandle();
 
@@ -1620,7 +1617,13 @@ impl WayshotConnection {
         let mem_file = File::from(mem_fd);
 
         // Take ownership of components rather than borrowing self in multiple ways
-        let mut event_queue = self.take_event_queue();
+        let mut event_queue = self
+			.ext_image
+			.as_mut()
+			.expect("ext_image should be initialized")
+			.event_queue
+			.take()
+			.expect("Control your self");
         let qh = {
             let ext_image = self.ext_image.as_ref().expect("ext_image should be initialized");
             ext_image.qh.as_ref().expect("Should init").clone()
@@ -1727,7 +1730,13 @@ impl WayshotConnection {
     /// The captured frame as an ImageViewInfo
     pub fn capture_frame_with_context(&mut self, context: &mut crate::ext_image_protocols::StreamingCaptureContext) -> Result<ImageViewInfo, WayshotError> {
         // Take ownership of components rather than borrowing self in multiple ways
-        let mut event_queue = self.take_event_queue();
+        let mut event_queue = self			
+			.ext_image
+			.as_mut()
+			.expect("ext_image should be initialized")
+			.event_queue
+			.take()
+			.expect("Control your self");
         let qh = {
             let ext_image = self.ext_image.as_ref().expect("ext_image should be initialized");
             ext_image.qh.as_ref().expect("Should init").clone()
