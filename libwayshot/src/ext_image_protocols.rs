@@ -52,8 +52,7 @@ pub struct ImageViewInfo {
 pub(crate) struct CaptureOutputData {
     pub(crate) output: WlOutput,
     pub(crate) buffer: WlBuffer,
-    pub(crate) real_width: u32,
-    pub(crate) real_height: u32,
+    pub(crate) physical_size: Size, // replaced real_width/real_height
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) frame_bytes: u32,
@@ -173,15 +172,14 @@ impl AreaShotInfo {
         }: Region,
     ) -> bool {
         let CaptureOutputData {
-            real_width,
-            real_height,
+            physical_size,
             screen_position: Position { x, y },
             ..
-        } = self.data;
-        if point.y < y
-            || point.x < x
-            || point.x > x + real_width as i32
-            || point.y > y + real_height as i32
+        } = &self.data;
+        if point.y < *y
+            || point.x < *x
+            || point.x > *x + physical_size.width as i32
+            || point.y > *y + physical_size.height as i32
         {
             return false;
         }
@@ -192,28 +190,27 @@ impl AreaShotInfo {
             return None;
         }
         let CaptureOutputData {
-            real_width,
-            real_height,
+            physical_size,
             width,
             height,
             screen_position,
             ..
-        } = self.data;
+        } = &self.data;
         let Region {
             position: point,
             size,
         } = region;
-        let relative_point = point - screen_position;
+        let relative_point = point - *screen_position;
         let position = Position {
-            x: (relative_point.x as f64 * width as f64 / real_width as f64) as i32,
-            y: (relative_point.y as f64 * height as f64 / real_height as f64) as i32,
+            x: (relative_point.x as f64 * *width as f64 / physical_size.width as f64) as i32,
+            y: (relative_point.y as f64 * *height as f64 / physical_size.height as f64) as i32,
         };
 
         Some(Region {
             position,
             size: Size {
-                width: (size.width as f64 * width as f64 / real_width as f64) as u32,
-                height: (size.height as f64 * height as f64 / real_height as f64) as u32,
+                width: (size.width as f64 * *width as f64 / physical_size.width as f64) as u32,
+                height: (size.height as f64 * *height as f64 / physical_size.height as f64) as u32,
             },
         })
     }
@@ -490,8 +487,10 @@ impl crate::WayshotConnection {
             frame_bytes,
             stride,
             frame_format,
-            real_width: real_width as u32,
-            real_height: real_height as u32,
+            physical_size: Size {
+                width: real_width as u32,
+                height: real_height as u32,
+            },
             transform,
             screen_position,
         })
@@ -539,8 +538,7 @@ impl crate::WayshotConnection {
             let CaptureOutputData {
                 output,
                 buffer,
-                real_width,
-                real_height,
+                physical_size,
                 transform,
                 ..
             } = data;
@@ -567,7 +565,7 @@ impl crate::WayshotConnection {
             surface.attach(Some(buffer), 0, 0);
 
             let viewport = viewporter.get_viewport(&surface, &qh, ());
-            viewport.set_destination(*real_width as i32, *real_height as i32);
+            viewport.set_destination(physical_size.width as i32, physical_size.height as i32);
 
             debug!("Committing surface with attached buffer.");
             surface.commit();
