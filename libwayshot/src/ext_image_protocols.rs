@@ -34,9 +34,6 @@ use nix::{
     unistd,
 };
 
-/// Import required for StreamingCaptureContext
-use crate::output::OutputInfo;
-
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
 /// and when you do area screenshot, This lib will also provide you with the view of the selected
@@ -291,6 +288,9 @@ pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
         }
     }
 }
+
+/// Import required for StreamingCaptureContext
+use crate::output::OutputInfo;
 
 /// Provides a reusable context for streaming captures without recreating resources
 ///

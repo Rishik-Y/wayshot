@@ -329,7 +329,7 @@ impl WayshotConnection {
                 },
             name,
             description,
-            // scale,
+            scale,
             ..
         } in self.get_all_outputs()
         {
@@ -338,7 +338,7 @@ impl WayshotConnection {
             println!("    Size: {width},{height}");
             println!("    LogicSize: {logical_width}, {logical_height}");
             println!("    Position: {x}, {y}");
-            // println!("    Scale: {scale}");
+            println!("    Scale: {scale}");
         }
     }
 
@@ -1265,12 +1265,7 @@ impl WayshotConnection {
     }
 }
 
-use wayland_client::protocol::{
-    wl_output::{self},
-    wl_registry::{self},
-    wl_shm::Format,
-    wl_shm_pool::WlShmPool,
-};
+use wayland_client::protocol::wl_shm::Format;
 
 impl WayshotConnection {
     /// get all outputs and their info
@@ -1293,9 +1288,9 @@ impl WayshotConnection {
         option: CaptureOption,
         output: OutputInfo,
     ) -> std::result::Result<ImageViewInfo, WayshotError> {
-        let mem_fd = crate::ext_image_protocols::ext_create_shm_fd().unwrap();
+        let mem_fd = ext_image_protocols::ext_create_shm_fd().unwrap();
         let mem_file = File::from(mem_fd);
-        let crate::ext_image_protocols::CaptureOutputData {
+        let ext_image_protocols::CaptureOutputData {
             width,
             height,
             frame_format,
@@ -1309,7 +1304,7 @@ impl WayshotConnection {
 
         let mut frame_mmap = unsafe { MmapMut::map_mut(&mem_file).unwrap() };
 
-        let converter = crate::convert::create_converter(frame_format).unwrap();
+        let converter = create_converter(frame_format).unwrap();
         let color_type = converter.convert_inplace(&mut frame_mmap);
 
         // Create a full screen region representing the entire output
@@ -1395,12 +1390,12 @@ impl WayshotConnection {
             .as_ref()
             .expect("Should init");
         let shm = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.shm
-			.as_ref()
-			.expect("Should init");
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .shm
+            .as_ref()
+            .expect("Should init");
         let info = info.read().unwrap();
 
         let Size { width, height } = info.size();
