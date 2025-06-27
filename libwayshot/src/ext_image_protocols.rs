@@ -291,24 +291,3 @@ pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
 
 /// Import required for StreamingCaptureContext
 use crate::output::OutputInfo;
-
-/// Provides a reusable context for streaming captures without recreating resources
-///
-/// This struct holds all necessary resources for capturing frames in a streaming
-/// context, allowing efficient capture of multiple frames without recreating
-/// Wayland protocol handles between frames.
-#[derive(Debug)]
-pub struct StreamingCaptureContext {
-	pub(crate) source: Option<wayland_protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1>,
-	pub(crate) session: Option<wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1>,
-	pub(crate) frame: Option<wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1>,
-	pub(crate) buffer: Option<WlBuffer>,
-	pub(crate) shm_pool: Option<wayland_client::protocol::wl_shm_pool::WlShmPool>,
-	pub(crate) mem_file: Option<File>,
-	pub(crate) width: u32,
-	pub(crate) height: u32,
-	pub(crate) stride: u32,
-	pub(crate) frame_format: Format,
-	pub(crate) output: OutputInfo,
-	pub(crate) option: CaptureOption,
-}
