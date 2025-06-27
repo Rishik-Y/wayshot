@@ -288,6 +288,3 @@ pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
         }
     }
 }
-
-/// Import required for StreamingCaptureContext
-use crate::output::OutputInfo;
