@@ -288,3 +288,321 @@ pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
         }
     }
 }
+
+use std::ops::Deref;
+
+// Implementation of WayshotConnection methods related to ext_image_protocols
+impl crate::WayshotConnection {
+    /// Capture a single output
+    pub fn ext_capture_single_output(
+        &mut self,
+        option: CaptureOption,
+        output: crate::output::OutputInfo,
+    ) -> std::result::Result<ImageViewInfo, crate::WayshotError> {
+        let mem_fd = ext_create_shm_fd().unwrap();
+        let mem_file = File::from(mem_fd);
+        let CaptureOutputData {
+            width,
+            height,
+            frame_format,
+            ..
+        } = self.ext_capture_output_inner(
+            output.clone(),
+            option,
+            mem_file.as_fd(),
+            Some(&mem_file),
+        )?;
+
+        let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
+
+        let converter = crate::convert::create_converter(frame_format).unwrap();
+        let color_type = converter.convert_inplace(&mut frame_mmap);
+
+        // Create a full screen region representing the entire output
+        let region = output.logical_region.inner.clone();
+
+        Ok(ImageViewInfo {
+            data: frame_mmap.deref().into(),
+            width,
+            height,
+            color_type,
+            region,
+        })
+    }
+
+    fn ext_capture_output_inner<T: AsFd>(
+        &mut self,
+        output_info: crate::output::OutputInfo,
+        option: CaptureOption,
+        fd: T,
+        file: Option<&File>,
+    ) -> std::result::Result<CaptureOutputData, crate::WayshotError> {
+        let crate::output::OutputInfo {
+            output,
+            logical_region:
+                crate::region::LogicalRegion {
+                    inner:
+                        crate::region::Region {
+                            position: screen_position,
+                            size:
+                                crate::region::Size {
+                                    width: real_width,
+                                    height: real_height,
+                                },
+                        },
+                },
+            ..
+        } = output_info;
+
+        let mut event_queue = self
+            .ext_image
+            .as_mut()
+            .expect("ext_image should be initialized")
+            .event_queue
+            .take()
+            .expect("Control your self");
+        let img_manager = self
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .output_image_manager
+            .as_ref()
+            .expect("Should init");
+        let capture_manager = self
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .img_copy_manager
+            .as_ref()
+            .expect("Should init");
+        let qh = self
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .qh
+            .as_ref()
+            .expect("Should init");
+        let source = img_manager.create_source(&output, qh, ());
+        let info = Arc::new(RwLock::new(FrameInfo::default()));
+        let session = capture_manager.create_session(&source, option.into(), qh, info.clone());
+
+        let capture_info = CaptureInfo::new();
+        let frame = session.create_frame(qh, capture_info.clone());
+        event_queue.blocking_dispatch(self).unwrap();
+        let qh = self
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .qh
+            .as_ref()
+            .expect("Should init");
+        let shm = self
+            .ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .shm
+            .as_ref()
+            .expect("Should init");
+        let info = info.read().unwrap();
+
+        let Size { width, height } = info.size();
+        let WEnum::Value(frame_format) = info.format() else {
+            return Err(crate::WayshotError::NotSupportFormat);
+        };
+        if !matches!(
+            frame_format,
+            Format::Xbgr2101010
+                | Format::Abgr2101010
+                | Format::Argb8888
+                | Format::Xrgb8888
+                | Format::Xbgr8888
+        ) {
+            return Err(crate::WayshotError::NotSupportFormat);
+        }
+        let frame_bytes = 4 * height * width;
+        let mem_fd = fd.as_fd();
+
+        if let Some(file) = file {
+            file.set_len(frame_bytes as u64).unwrap();
+        }
+
+        let stride = 4 * width;
+
+        let shm_pool = shm.create_pool(mem_fd, (width * height * 4) as i32, qh, ());
+        let buffer = shm_pool.create_buffer(
+            0,
+            width as i32,
+            height as i32,
+            stride as i32,
+            frame_format,
+            qh,
+            (),
+        );
+        frame.attach_buffer(&buffer);
+        frame.capture();
+
+        let transform;
+        loop {
+            event_queue.blocking_dispatch(self)?;
+            let info = capture_info.read().unwrap();
+            match info.state() {
+                FrameState::Succeeded => {
+                    transform = info.transform();
+                    break;
+                }
+                FrameState::Failed(info) => match info {
+                    Some(WEnum::Value(reason)) => match reason {
+                        wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::Stopped => {
+                            return Err(crate::WayshotError::CaptureFailed("Stopped".to_owned()));
+                        }
+
+                        wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::BufferConstraints => {
+                            return Err(crate::WayshotError::CaptureFailed(
+                                "BufferConstraints".to_owned(),
+                            ));
+                        }
+                        wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::Unknown | _ => {
+                            return Err(crate::WayshotError::CaptureFailed("Unknown".to_owned()));
+                        }
+                    },
+                    Some(WEnum::Unknown(code)) => {
+                        return Err(crate::WayshotError::CaptureFailed(format!(
+                            "Unknown reason, code : {code}"
+                        )));
+                    }
+                    None => {
+                        return Err(crate::WayshotError::CaptureFailed(
+                            "No failure reason provided".to_owned(),
+                        ));
+                    }
+                },
+                FrameState::Pending => {}
+            }
+        }
+
+        self.reset_event_queue(event_queue);
+
+        Ok(CaptureOutputData {
+            output,
+            buffer,
+            width,
+            height,
+            frame_bytes,
+            stride,
+            frame_format,
+            real_width: real_width as u32,
+            real_height: real_height as u32,
+            transform,
+            screen_position,
+        })
+    }
+
+    pub fn ext_capture_area2<F>(
+        &mut self,
+        option: CaptureOption,
+        callback: F,
+    ) -> std::result::Result<ImageViewInfo, crate::WayshotError>
+    where
+        F: AreaSelectCallback,
+    {
+        use crate::dispatch::XdgShellState;
+        use wayland_client::{protocol::wl_surface::WlSurface, EventQueue};
+        use wayland_protocols::xdg::shell::client::{xdg_surface::XdgSurface, xdg_toplevel::XdgToplevel};
+        use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
+        use wayland_client::protocol::wl_compositor::WlCompositor;
+        use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
+        use tracing::debug;
+
+        let outputs = self.vector_of_Outputs().clone();
+
+        let mut data_list = vec![];
+        for data in outputs.into_iter() {
+            let mem_fd = ext_create_shm_fd().unwrap();
+            let mem_file = File::from(mem_fd);
+            let data =
+                self.ext_capture_output_inner(data, option, mem_file.as_fd(), Some(&mem_file))?;
+            data_list.push(AreaShotInfo { data, mem_file })
+        }
+
+        let mut state = XdgShellState::new();
+        let mut event_queue: EventQueue<XdgShellState> = self.conn.new_event_queue();
+        let globals = &self.globals;
+        let qh = event_queue.handle();
+
+        let compositor = globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ())?;
+        let xdg_wm_base = globals.bind::<XdgWmBase, _, _>(&qh, 1..=1, ())?;
+        let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ())?;
+
+        let mut xdg_surfaces: Vec<(WlSurface, XdgSurface, XdgToplevel)> =
+            Vec::with_capacity(data_list.len());
+        for AreaShotInfo { data, .. } in data_list.iter() {
+            let CaptureOutputData {
+                output,
+                buffer,
+                real_width,
+                real_height,
+                transform,
+                ..
+            } = data;
+            let surface = compositor.create_surface(&qh, ());
+
+            let xdg_surface = xdg_wm_base.get_xdg_surface(&surface, &qh, output.clone());
+            let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
+
+            // Configure the toplevel to be fullscreen on the specific output
+            xdg_toplevel.set_fullscreen(Some(output));
+            xdg_toplevel.set_title("wayshot-overlay".to_string());
+            xdg_toplevel.set_app_id("wayshot".to_string());
+
+            debug!("Committing surface creation changes.");
+            surface.commit();
+
+            debug!("Waiting for layer surface to be configured.");
+            while !state.configured_surfaces.contains(&xdg_surface) {
+                event_queue.blocking_dispatch(&mut state)?;
+            }
+
+            surface.set_buffer_transform(*transform);
+            // surface.set_buffer_scale(output_info.scale());
+            surface.attach(Some(buffer), 0, 0);
+
+            let viewport = viewporter.get_viewport(&surface, &qh, ());
+            viewport.set_destination(*real_width as i32, *real_height as i32);
+
+            debug!("Committing surface with attached buffer.");
+            surface.commit();
+            xdg_surfaces.push((surface, xdg_surface, xdg_toplevel));
+            event_queue.blocking_dispatch(&mut state)?;
+        }
+
+        let region_re = callback.Screenshot(self);
+
+        debug!("Unmapping and destroying layer shell surfaces.");
+        for (surface, xdg_surface, xdg_toplevel) in xdg_surfaces.iter() {
+            surface.attach(None, 0, 0);
+            surface.commit(); // unmap surface by committing a null buffer
+            xdg_toplevel.destroy();
+            xdg_surface.destroy();
+        }
+        event_queue.roundtrip(&mut state)?;
+        let region = region_re?;
+
+        let shotdata = data_list
+            .iter()
+            .find(|data| data.in_this_screen(region))
+            .ok_or(crate::WayshotError::CaptureFailed("not in region".to_owned()))?;
+        let area = shotdata.clip_area(region).expect("should have");
+        let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&shotdata.mem_file).unwrap() };
+
+        let converter = crate::convert::create_converter(shotdata.data.frame_format).unwrap();
+        let color_type = converter.convert_inplace(&mut frame_mmap);
+
+        Ok(ImageViewInfo {
+            data: frame_mmap.deref().into(),
+            width: shotdata.data.width,
+            height: shotdata.data.height,
+            color_type,
+            region: area,
+        })
+    }
+}
