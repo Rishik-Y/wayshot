@@ -135,11 +135,6 @@ fn main() -> Result<()> {
                     ext_capture_area(&mut state, stdout_print, cursor)
                 } else if cli.color {
                     ext_capture_color(&mut state)
-                } else if cli.experimental {
-                    let frames = 20;
-                    let delay_ms = 1;
-                    // Use streaming capture for experimental mode with frames parameter
-                    ext_streaming_capture(&mut state, output, frames, delay_ms, cursor)
                 } else {
                     ext_capture_output(&mut state, output, stdout_print, cursor)
                 };
