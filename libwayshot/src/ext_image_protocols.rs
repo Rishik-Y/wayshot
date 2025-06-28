@@ -49,16 +49,32 @@ pub struct ImageViewInfo {
 
 #[allow(unused)]
 #[derive(Debug, Clone)]
+pub(crate) struct FrameInfo {
+    pub(crate) format: Format,
+    pub(crate) size: Size,
+    pub(crate) stride: u32,
+}
+
+impl FrameInfo {
+    pub(crate) fn byte_size(&self) -> u32 {
+        self.stride * self.size.height
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct CaptureOutputData {
     pub(crate) output: WlOutput,
     pub(crate) buffer: WlBuffer,
-    pub(crate) physical_size: Size, // replaced real_width/real_height
-    pub(crate) logical_region: LogicalRegion, // replaces width, height, screen_position
-    pub(crate) frame_bytes: u32,
-    pub(crate) stride: u32,
-    pub(crate) transform: wl_output::Transform,
-    pub(crate) frame_format: Format,
+
+    pub(crate) frame_info: FrameInfo,
+
     pub(crate) color_type: ColorType, // added here
+
+
+	pub(crate) transform: wl_output::Transform,
+	pub(crate) logical_region: LogicalRegion, // replaces width, height, screen_position
+	pub(crate) physical_size: Size, // replaced real_width/real_height
+
 }
 
 #[derive(Debug, Clone)]
@@ -84,22 +100,6 @@ impl TopLevel {
     }
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct FrameInfo {
-    pub(crate) buffer_size: Option<Size>,
-    pub(crate) shm_format: Option<WEnum<Format>>,
-}
-
-impl FrameInfo {
-    pub(crate) fn size(&self) -> Size {
-        self.buffer_size.clone().expect("not inited")
-    }
-
-    pub(crate) fn format(&self) -> WEnum<Format> {
-        self.shm_format.clone().expect("Not inited")
-    }
-}
-
 pub(crate) struct CaptureInfo {
     pub(crate) transform: wl_output::Transform,
     pub(crate) state: FrameState,
@@ -122,19 +122,19 @@ impl CaptureInfo {
 }
 
 pub trait AreaSelectCallback {
-    fn Screenshot(self, state: &WayshotConnection) -> Result<Region, WayshotError>;
+    fn screenshot(self, state: &WayshotConnection) -> Result<Region, WayshotError>;
 }
 
 impl<F> AreaSelectCallback for F
 where
     F: Fn(&WayshotConnection) -> Result<Region, WayshotError>,
 {
-    fn Screenshot(self, state: &WayshotConnection) -> Result<Region, WayshotError> {
+    fn screenshot(self, state: &WayshotConnection) -> Result<Region, WayshotError> {
         self(state)
     }
 }
 impl AreaSelectCallback for Region {
-    fn Screenshot(self, _state: &WayshotConnection) -> Result<Region, WayshotError> {
+    fn screenshot(self, _state: &WayshotConnection) -> Result<Region, WayshotError> {
         Ok(self)
     }
 }
@@ -308,7 +308,7 @@ impl crate::WayshotConnection {
 
         let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
 
-        let converter = crate::convert::create_converter(capture_data.frame_format).unwrap();
+        let converter = crate::convert::create_converter(capture_data.frame_info.format).unwrap();
         let color_type = converter.convert_inplace(&mut frame_mmap);
 
         capture_data.color_type = color_type;
@@ -367,7 +367,11 @@ impl crate::WayshotConnection {
             .as_ref()
             .expect("Should init");
         let source = img_manager.create_source(&output, qh, ());
-        let info = Arc::new(RwLock::new(FrameInfo::default()));
+        let info = Arc::new(RwLock::new(FrameInfo {
+            format: Format::Xrgb8888, // placeholder, will be set by protocol event
+            size: Size { width: 0, height: 0 }, // placeholder
+            stride: 0, // placeholder
+        }));
         let session = capture_manager.create_session(&source, option.into(), qh, info.clone());
 
         let capture_info = CaptureInfo::new();
@@ -389,10 +393,9 @@ impl crate::WayshotConnection {
             .expect("Should init");
         let info = info.read().unwrap();
 
-        let Size { width, height } = info.size();
-        let WEnum::Value(frame_format) = info.format() else {
-            return Err(crate::WayshotError::NotSupportFormat);
-        };
+        // Use direct field access for FrameInfo
+        let Size { width, height } = info.size;
+        let frame_format = info.format;
         if !matches!(
             frame_format,
             Format::Xbgr2101010
@@ -470,15 +473,20 @@ impl crate::WayshotConnection {
             output,
             buffer,
             logical_region: logical_region.clone(),
-            frame_bytes,
-            stride,
-            frame_format,
+            frame_info: FrameInfo {
+                format: frame_format,
+                size: Size {
+                    width: logical_region.inner.size.width as u32,
+                    height: logical_region.inner.size.height as u32,
+                },
+                stride,
+            },
+            transform,
+            color_type: ColorType::Rgba8, // placeholder, will be set after conversion
             physical_size: Size {
                 width: logical_region.inner.size.width as u32,
                 height: logical_region.inner.size.height as u32,
             },
-            transform,
-            color_type: ColorType::Rgba8, // placeholder, will be set after conversion
         })
     }
 
@@ -559,7 +567,7 @@ impl crate::WayshotConnection {
             event_queue.blocking_dispatch(&mut state)?;
         }
 
-        let region_re = callback.Screenshot(self);
+        let region_re = callback.screenshot(self);
 
         debug!("Unmapping and destroying layer shell surfaces.");
         for (surface, xdg_surface, xdg_toplevel) in xdg_surfaces.iter() {
@@ -578,7 +586,7 @@ impl crate::WayshotConnection {
         let area = shotdata.clip_area(region).expect("should have");
         let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&shotdata.mem_file).unwrap() };
 
-        let converter = crate::convert::create_converter(shotdata.data.frame_format).unwrap();
+        let converter = crate::convert::create_converter(shotdata.data.frame_info.format).unwrap();
         let color_type = converter.convert_inplace(&mut frame_mmap);
 
         // Set color_type in CaptureOutputData

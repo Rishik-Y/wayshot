@@ -527,13 +527,11 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, Arc<RwLock<FrameInfo>>> for WayshotC
         let mut frame_info = data.write().unwrap();
         match event {
             ext_image_copy_capture_session_v1::Event::BufferSize { width, height } => {
-                if frame_info.buffer_size.is_none() {
-                    frame_info.buffer_size = Some(Size { width, height });
-                }
+                frame_info.size = Size { width, height };
             }
             ext_image_copy_capture_session_v1::Event::ShmFormat { format } => {
-                if frame_info.shm_format.is_none() {
-                    frame_info.shm_format = Some(format);
+                if let WEnum::Value(fmt) = format {
+                    frame_info.format = fmt;
                 }
             }
             ext_image_copy_capture_session_v1::Event::Done => {}
