@@ -26,7 +26,7 @@ use std::os::fd::OwnedFd;
 use crate::WayshotConnection;
 use crate::WayshotError; // Removed WayshotBase import
 use crate::dispatch::FrameState;
-use crate::region::{Position, Region, Size};
+use crate::region::{Position, Region, Size, LogicalRegion};
 
 use nix::{
     fcntl,
@@ -43,7 +43,7 @@ pub struct ImageViewInfo {
     pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,
-    pub color_type: ColorType,
+    pub color_type: ColorType, // add this field
     pub region: Region,
 }
 
@@ -53,13 +53,12 @@ pub(crate) struct CaptureOutputData {
     pub(crate) output: WlOutput,
     pub(crate) buffer: WlBuffer,
     pub(crate) physical_size: Size, // replaced real_width/real_height
-    pub(crate) width: u32,
-    pub(crate) height: u32,
+    pub(crate) logical_region: LogicalRegion, // replaces width, height, screen_position
     pub(crate) frame_bytes: u32,
     pub(crate) stride: u32,
     pub(crate) transform: wl_output::Transform,
     pub(crate) frame_format: Format,
-    pub(crate) screen_position: Position,
+    pub(crate) color_type: ColorType, // added here
 }
 
 #[derive(Debug, Clone)]
@@ -173,13 +172,14 @@ impl AreaShotInfo {
     ) -> bool {
         let CaptureOutputData {
             physical_size,
-            screen_position: Position { x, y },
+            logical_region,
             ..
         } = &self.data;
-        if point.y < *y
-            || point.x < *x
-            || point.x > *x + physical_size.width as i32
-            || point.y > *y + physical_size.height as i32
+        let Position { x, y } = logical_region.inner.position;
+        if point.y < y
+            || point.x < x
+            || point.x > x + physical_size.width as i32
+            || point.y > y + physical_size.height as i32
         {
             return false;
         }
@@ -191,26 +191,27 @@ impl AreaShotInfo {
         }
         let CaptureOutputData {
             physical_size,
-            width,
-            height,
-            screen_position,
+            logical_region,
             ..
         } = &self.data;
+        let width = logical_region.inner.size.width;
+        let height = logical_region.inner.size.height;
+        let screen_position = logical_region.inner.position;
         let Region {
             position: point,
             size,
         } = region;
-        let relative_point = point - *screen_position;
+        let relative_point = point - screen_position;
         let position = Position {
-            x: (relative_point.x as f64 * *width as f64 / physical_size.width as f64) as i32,
-            y: (relative_point.y as f64 * *height as f64 / physical_size.height as f64) as i32,
+            x: (relative_point.x as f64 * width as f64 / physical_size.width as f64) as i32,
+            y: (relative_point.y as f64 * height as f64 / physical_size.height as f64) as i32,
         };
 
         Some(Region {
             position,
             size: Size {
-                width: (size.width as f64 * *width as f64 / physical_size.width as f64) as u32,
-                height: (size.height as f64 * *height as f64 / physical_size.height as f64) as u32,
+                width: (size.width as f64 * width as f64 / physical_size.width as f64) as u32,
+                height: (size.height as f64 * height as f64 / physical_size.height as f64) as u32,
             },
         })
     }
@@ -298,12 +299,7 @@ impl crate::WayshotConnection {
     ) -> std::result::Result<ImageViewInfo, crate::WayshotError> {
         let mem_fd = ext_create_shm_fd().unwrap();
         let mem_file = File::from(mem_fd);
-        let CaptureOutputData {
-            width,
-            height,
-            frame_format,
-            ..
-        } = self.ext_capture_output_inner(
+        let mut capture_data = self.ext_capture_output_inner(
             output.clone(),
             option,
             mem_file.as_fd(),
@@ -312,17 +308,19 @@ impl crate::WayshotConnection {
 
         let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
 
-        let converter = crate::convert::create_converter(frame_format).unwrap();
+        let converter = crate::convert::create_converter(capture_data.frame_format).unwrap();
         let color_type = converter.convert_inplace(&mut frame_mmap);
+
+        capture_data.color_type = color_type;
 
         // Create a full screen region representing the entire output
         let region = output.logical_region.inner.clone();
 
         Ok(ImageViewInfo {
             data: frame_mmap.deref().into(),
-            width,
-            height,
-            color_type,
+            width: capture_data.logical_region.inner.size.width,
+            height: capture_data.logical_region.inner.size.height,
+            color_type: capture_data.color_type, // pass color_type
             region,
         })
     }
@@ -336,18 +334,7 @@ impl crate::WayshotConnection {
     ) -> std::result::Result<CaptureOutputData, crate::WayshotError> {
         let crate::output::OutputInfo {
             output,
-            logical_region:
-                crate::region::LogicalRegion {
-                    inner:
-                        crate::region::Region {
-                            position: screen_position,
-                            size:
-                                crate::region::Size {
-                                    width: real_width,
-                                    height: real_height,
-                                },
-                        },
-                },
+            logical_region,
             ..
         } = output_info;
 
@@ -482,17 +469,16 @@ impl crate::WayshotConnection {
         Ok(CaptureOutputData {
             output,
             buffer,
-            width,
-            height,
+            logical_region: logical_region.clone(),
             frame_bytes,
             stride,
             frame_format,
             physical_size: Size {
-                width: real_width as u32,
-                height: real_height as u32,
+                width: logical_region.inner.size.width as u32,
+                height: logical_region.inner.size.height as u32,
             },
             transform,
-            screen_position,
+            color_type: ColorType::Rgba8, // placeholder, will be set after conversion
         })
     }
 
@@ -518,7 +504,7 @@ impl crate::WayshotConnection {
         for data in outputs.into_iter() {
             let mem_fd = ext_create_shm_fd().unwrap();
             let mem_file = File::from(mem_fd);
-            let data =
+            let mut data =
                 self.ext_capture_output_inner(data, option, mem_file.as_fd(), Some(&mem_file))?;
             data_list.push(AreaShotInfo { data, mem_file })
         }
@@ -595,11 +581,15 @@ impl crate::WayshotConnection {
         let converter = crate::convert::create_converter(shotdata.data.frame_format).unwrap();
         let color_type = converter.convert_inplace(&mut frame_mmap);
 
+        // Set color_type in CaptureOutputData
+        let mut shotdata = shotdata.data.clone();
+        shotdata.color_type = color_type;
+
         Ok(ImageViewInfo {
             data: frame_mmap.deref().into(),
-            width: shotdata.data.width,
-            height: shotdata.data.height,
-            color_type,
+            width: shotdata.logical_region.inner.size.width,
+            height: shotdata.logical_region.inner.size.height,
+            color_type: shotdata.color_type, // pass color_type
             region: area,
         })
     }

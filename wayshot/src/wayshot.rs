@@ -112,7 +112,7 @@ fn main() -> Result<()> {
     // Create WayshotConnection (will automatically use ext_image protocol if available)
     let connection_result = libwayshot::WayshotConnection::new();
 
-    let testing = false; // Change to false to force wlr_screencopy
+    let testing = true; // Change to false to force wlr_screencopy
 
     match connection_result {
         Ok(mut state) => {

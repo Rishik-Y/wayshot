@@ -413,8 +413,6 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
 
 use wayland_client::event_created_child;
 
-use std::sync::{Arc, RwLock};
-
 use crate::WayshotConnection;
 use crate::ext_image_protocols::{CaptureInfo, FrameInfo, TopLevel}; // Add this import
 
@@ -487,6 +485,8 @@ impl Dispatch<ExtForeignToplevelHandleV1, ()> for WayshotConnection {
         current_info.title = title;
     }
 }
+
+use std::sync::{Arc, RwLock};
 
 impl Dispatch<ExtImageCopyCaptureFrameV1, Arc<RwLock<CaptureInfo>>> for WayshotConnection {
     fn event(
