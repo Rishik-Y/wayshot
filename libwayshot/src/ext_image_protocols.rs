@@ -428,15 +428,21 @@ impl crate::WayshotConnection {
         let frame_format = info.format;
         if !matches!(
             frame_format,
-            Format::Xbgr2101010
+			Format::Xbgr2101010
+				| Format::Xrgb2101010
                 | Format::Abgr2101010
                 | Format::Argb8888
                 | Format::Xrgb8888
                 | Format::Xbgr8888
+				| Format::Bgr888
         ) {
-            return Err(crate::WayshotError::NotSupportFormat);
-        }
-        let frame_bytes = 4 * height * width;
+			println!("Unsupported format: {:?}", frame_format);
+			return Err(crate::WayshotError::NotSupportFormat);
+		} else {
+			println!("Matched format: {:?}", frame_format);
+		}
+
+		let frame_bytes = 4 * height * width;
         let mem_fd = fd.as_fd();
 
         if let Some(file) = file {

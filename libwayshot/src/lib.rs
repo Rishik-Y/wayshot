@@ -691,6 +691,7 @@ impl WayshotConnection {
                 matches!(
                     frame.format,
                     wl_shm::Format::Xbgr2101010
+						| wl_shm::Format::Xrgb2101010
                         | wl_shm::Format::Abgr2101010
                         | wl_shm::Format::Argb8888
                         | wl_shm::Format::Xrgb8888
