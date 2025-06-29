@@ -469,20 +469,34 @@ impl Dispatch<ExtForeignToplevelHandleV1, ()> for WayshotConnection {
         _conn: &Connection,
         _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
-        let ext_foreign_toplevel_handle_v1::Event::Title { title } = event else {
-            return;
+        // Use ext_image.toplevels for all fields
+        let toplevels = match state.ext_image.as_mut() {
+            Some(ext_image) => &mut ext_image.toplevels,
+            None => return,
         };
-        let Some(current_info) = state
-            .ext_image
-            .as_mut()
-            .expect("ext_image should be initialized")
-            .toplevels
-            .iter_mut()
-            .find(|my_toplevel| my_toplevel.handle == *toplevel)
-        else {
-            return;
-        };
-        current_info.title = title;
+        match event {
+            ext_foreign_toplevel_handle_v1::Event::Title { title } => {
+                if let Some(current_info) = toplevels.iter_mut().find(|my_toplevel| my_toplevel.handle == *toplevel) {
+                    current_info.title = title;
+                }
+            }
+            ext_foreign_toplevel_handle_v1::Event::AppId { app_id } => {
+                if let Some(current_info) = toplevels.iter_mut().find(|my_toplevel| my_toplevel.handle == *toplevel) {
+                    current_info.app_id = app_id;
+                }
+            }
+            ext_foreign_toplevel_handle_v1::Event::Identifier { identifier } => {
+                if let Some(current_info) = toplevels.iter_mut().find(|my_toplevel| my_toplevel.handle == *toplevel) {
+                    current_info.identifier = identifier;
+                }
+            }
+            ext_foreign_toplevel_handle_v1::Event::Closed => {
+                if let Some(current_info) = toplevels.iter_mut().find(|my_toplevel| my_toplevel.handle == *toplevel) {
+                    current_info.active = false;
+                }
+            }
+            _ => {}
+        }
     }
 }
 

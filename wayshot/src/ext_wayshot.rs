@@ -69,6 +69,26 @@ pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>)
     }
 }
 
+pub fn ext_capture_toplevel(
+	state: &mut WayshotConnection,
+	use_stdout: bool,
+	pointer: bool,
+) -> Result<WayshotResult, WayshotImageWriteError> {
+	let toplevels = state.toplevels();
+	let names: Vec<String> = toplevels.iter().map(|info| info.id_and_title()).collect();
+
+	let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+		.with_prompt("Choose Application")
+		.default(0)
+		.items(&names)
+		.interact()?;
+
+	let toplevel = toplevels[selection].clone();
+	let image_info = state.ext_capture_toplevel2(pointer.to_capture_option(), toplevel)?;
+
+	write_to_image(image_info, use_stdout)
+}
+
 pub fn ext_capture_output(
     state: &mut WayshotConnection,
     output: Option<String>,

@@ -112,7 +112,7 @@ fn main() -> Result<()> {
     // Create WayshotConnection (will automatically use ext_image protocol if available)
     let connection_result = libwayshot::WayshotConnection::new();
 
-    let testing = true; // Change to false to force wlr_screencopy
+    let testing = false; // Change to false to force wlr_screencopy
 
     match connection_result {
         Ok(mut state) => {
@@ -134,8 +134,10 @@ fn main() -> Result<()> {
                 let result = if cli.geometry {
                     ext_capture_area(&mut state, stdout_print, cursor)
                 } else if cli.color {
-                    ext_capture_color(&mut state)
-                } else {
+					ext_capture_color(&mut state)
+				} else if cli.experimental {
+					ext_capture_toplevel(&mut state, stdout_print, cursor)
+				} else {
                     ext_capture_output(&mut state, output, stdout_print, cursor)
                 };
 

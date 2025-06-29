@@ -77,6 +77,7 @@ use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_captu
 use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
 use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
+use wayland_protocols::ext::image_capture_source::v1::client::ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1;
 use crate::region::Region;
 
 /// Struct to store wayland connection and globals list.
@@ -96,6 +97,7 @@ pub struct ExtBase<T> {
     pub shm: Option<WlShm>,
     pub qh: Option<QueueHandle<T>>,
     pub event_queue: Option<EventQueue<T>>,
+	pub toplevel_image_manager: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
 }
 
 #[derive(Debug)]
@@ -156,7 +158,8 @@ impl WayshotConnection {
                     shm: None,
                     qh: None,
                     event_queue: None,
-                })
+					toplevel_image_manager: None,
+				})
             } else {
                 None
             },
@@ -180,6 +183,12 @@ impl WayshotConnection {
                         .bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())
                     {
                         Ok(output_image_manager) => {
+                            // Add binding for toplevel_image_manager here
+                            let toplevel_image_manager = initial_state
+                                .globals
+                                .bind::<ExtForeignToplevelImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())
+                                .ok();
+
                             match initial_state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ()) {
                                 Ok(shm) => {
                                     // Try to bind to toplevel list, but don't fail if not available
@@ -189,6 +198,15 @@ impl WayshotConnection {
 
                                     // Process events to ensure all bound globals are initialized
                                     event_queue.blocking_dispatch(&mut initial_state)?;
+
+                                    // Set toplevel_image_manager if available
+                                    if let Some(toplevel_image_manager) = toplevel_image_manager {
+                                        if let Some(state) = initial_state.ext_image.as_mut() {
+                                            state
+                                                .toplevel_image_manager
+                                                .replace(toplevel_image_manager);
+                                        }
+                                    }
 
                                     // Store the globals we fetched
                                     if let Some(ext_image) = initial_state.ext_image.as_mut() {
@@ -1268,6 +1286,15 @@ impl WayshotConnection {
     /// get all outputs and their info
     pub fn vector_of_Outputs(&self) -> &Vec<OutputInfo> {
         &self.output_infos
+    }
+
+    /// get all toplevels (windows) info
+    pub fn toplevels(&self) -> &Vec<TopLevel> {
+        self.ext_image
+            .as_ref()
+            .expect("ext_image should be initialized")
+            .toplevels
+            .as_ref()
     }
 
     pub(crate) fn reset_event_queue(&mut self, event_queue: EventQueue<Self>) {
