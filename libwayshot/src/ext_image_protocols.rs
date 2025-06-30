@@ -12,6 +12,9 @@ use std::sync::{Arc, RwLock};
 
 use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
 
+use image::{DynamicImage, ImageBuffer, Pixel};
+use memmap2::MmapMut;
+
 use image::ColorType;
 
 use std::os::fd::{AsFd, AsRawFd};
@@ -61,7 +64,7 @@ impl FrameInfo {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct CaptureOutputData {
     pub(crate) output: WlOutput,
     pub(crate) buffer: WlBuffer,
@@ -74,7 +77,7 @@ pub(crate) struct CaptureOutputData {
 	pub(crate) transform: wl_output::Transform,
 	pub(crate) logical_region: LogicalRegion, // replaces width, height, screen_position
 	pub(crate) physical_size: Size, // replaced real_width/real_height
-
+	pub(crate) mmap: Option<memmap2::MmapMut>, // NEW: store mmap for image data
 }
 
 #[derive(Debug, Clone)]
@@ -97,25 +100,17 @@ impl TopLevel {
 		}
     }
 
-    pub fn title(&self) -> &str {
-        &self.title
-    }
-
-	pub fn app_id(&self) -> &str {
-		&self.app_id
-	}
-
-	pub fn identifier(&self) -> &str {
-		&self.identifier
-	}
-
 	pub fn id_and_title(&self) -> String {
-		format!("{} {}", self.app_id(), self.title())
+		format!("{} {}", self.app_id, self.title)
 	}
 
-    pub fn handle(&self) -> &ExtForeignToplevelHandleV1 {
-        &self.handle
-    }
+	// pub fn identifier(&self) -> &str {
+	// 	&self.identifier
+	// }
+	
+    // pub fn handle(&self) -> &ExtForeignToplevelHandleV1 {
+    //    &self.handle
+    // }
 }
 
 pub(crate) struct CaptureInfo {
@@ -142,13 +137,9 @@ impl CaptureInfo {
 #[allow(unused)]
 #[derive(Debug, Clone)]
 struct CaptureTopLevelData {
-	buffer: WlBuffer,
-	width: u32,
-	height: u32,
-	frame_bytes: u32,
-	stride: u32,
-	frame_format: Format,
-	transform: wl_output::Transform,
+    buffer: WlBuffer,
+    frame_info: FrameInfo,
+    transform: wl_output::Transform,
 }
 
 pub trait AreaSelectCallback {
@@ -342,12 +333,13 @@ impl crate::WayshotConnection {
         let color_type = converter.convert_inplace(&mut frame_mmap);
 
         capture_data.color_type = color_type;
+        capture_data.mmap = Some(frame_mmap);
 
         // Create a full screen region representing the entire output
         let region = output.logical_region.inner.clone();
 
         Ok(ImageViewInfo {
-            data: frame_mmap.deref().into(),
+            data: capture_data.mmap.as_ref().unwrap().to_vec(),
             width: capture_data.logical_region.inner.size.width,
             height: capture_data.logical_region.inner.size.height,
             color_type: capture_data.color_type, // pass color_type
@@ -523,6 +515,7 @@ impl crate::WayshotConnection {
                 width: logical_region.inner.size.width as u32,
                 height: logical_region.inner.size.height as u32,
             },
+            mmap: None, // Initialize mmap as None
         })
     }
 
@@ -550,6 +543,9 @@ impl crate::WayshotConnection {
             let mem_file = File::from(mem_fd);
             let mut data =
                 self.ext_capture_output_inner(data, option, mem_file.as_fd(), Some(&mem_file))?;
+            // Set mmap in CaptureOutputData
+            let frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
+            data.mmap = Some(frame_mmap);
             data_list.push(AreaShotInfo { data, mem_file })
         }
 
@@ -620,20 +616,18 @@ impl crate::WayshotConnection {
             .find(|data| data.in_this_screen(region))
             .ok_or(crate::WayshotError::CaptureFailed("not in region".to_owned()))?;
         let area = shotdata.clip_area(region).expect("should have");
-        let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&shotdata.mem_file).unwrap() };
-
-        let converter = crate::convert::create_converter(shotdata.data.frame_info.format).unwrap();
-        let color_type = converter.convert_inplace(&mut frame_mmap);
-
-        // Set color_type in CaptureOutputData
-        let mut shotdata = shotdata.data.clone();
-        shotdata.color_type = color_type;
-
+        // Use mmap from CaptureOutputData
+        let shotdata_ref = &shotdata.data;
+        let frame_mmap = shotdata_ref.mmap.as_ref().unwrap();
+        let converter = crate::convert::create_converter(shotdata_ref.frame_info.format).unwrap();
+        let mut mmap_vec = frame_mmap.to_vec();
+        let color_type = converter.convert_inplace(&mut mmap_vec);
+        // No need to mutate shotdata_ref.color_type, just use color_type
         Ok(ImageViewInfo {
-            data: frame_mmap.deref().into(),
-            width: shotdata.logical_region.inner.size.width,
-            height: shotdata.logical_region.inner.size.height,
-            color_type: shotdata.color_type, // pass color_type
+            data: mmap_vec,
+            width: shotdata_ref.logical_region.inner.size.width,
+            height: shotdata_ref.logical_region.inner.size.height,
+            color_type,
             region: area,
         })
     }
@@ -647,27 +641,25 @@ impl crate::WayshotConnection {
 		let mem_fd = ext_create_shm_fd().unwrap();
 		let mem_file = File::from(mem_fd);
 		let CaptureTopLevelData {
-			width,
-			height,
-			frame_format,
+			frame_info,
 			..
 		} = self.ext_capture_toplevel_inner(toplevel, option, mem_file.as_fd(), Some(&mem_file))?;
 
 		let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
 
-		let converter = crate::convert::create_converter(frame_format).unwrap();
+		let converter = crate::convert::create_converter(frame_info.format).unwrap();
 		let color_type = converter.convert_inplace(&mut frame_mmap);
 
         // Use the full window as the region
         let region = Region {
             position: Position { x: 0, y: 0 },
-            size: Size { width, height },
+            size: frame_info.size,
         };
 
 		Ok(ImageViewInfo {
-			data: frame_mmap.deref().into(),
-			width,
-			height,
+			data: frame_mmap.to_vec(),
+			width: frame_info.size.width,
+			height: frame_info.size.height,
 			color_type,
 			region,
 		})
@@ -753,7 +745,7 @@ impl crate::WayshotConnection {
 
 		let shm_pool = shm.create_pool(mem_fd, (width * height * 4) as i32, qh, ());
 		let buffer = shm_pool.create_buffer(
-			0,
+		0,
 			width as i32,
 			height as i32,
 			stride as i32,
@@ -806,13 +798,36 @@ impl crate::WayshotConnection {
 		Ok(CaptureTopLevelData {
 			transform,
 			buffer,
-			width,
-			height,
-			frame_bytes,
-			stride,
-			frame_format,
+			frame_info: FrameInfo {
+				format: frame_format,
+				size: Size { width, height },
+				stride,
+			},
 		})
 	}
 }
 
 use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason;
+
+impl TryFrom<&CaptureOutputData> for DynamicImage {
+    type Error = WayshotError;
+
+    fn try_from(value: &CaptureOutputData) -> Result<Self, WayshotError> {
+        let mmap = value.mmap.as_ref().ok_or(WayshotError::BufferTooSmall)?;
+        let width = value.frame_info.size.width;
+        let height = value.frame_info.size.height;
+        match value.color_type {
+            image::ColorType::Rgb8 => {
+                let buffer = ImageBuffer::from_vec(width, height, mmap.to_vec())
+                    .ok_or(WayshotError::BufferTooSmall)?;
+                Ok(DynamicImage::ImageRgb8(buffer))
+            }
+            image::ColorType::Rgba8 => {
+                let buffer = ImageBuffer::from_vec(width, height, mmap.to_vec())
+                    .ok_or(WayshotError::BufferTooSmall)?;
+                Ok(DynamicImage::ImageRgba8(buffer))
+            }
+            _ => Err(WayshotError::InvalidColor),
+        }
+    }
+}
