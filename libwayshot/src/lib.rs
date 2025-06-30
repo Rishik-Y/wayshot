@@ -66,7 +66,7 @@ pub mod reexport {
     use wayland_client::protocol::wl_output;
     pub use wl_output::{Transform, WlOutput};
 }
-use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, FrameInfo, ImageViewInfo, TopLevel};
+use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, ImageViewInfo, TopLevel};
 use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 use wayland_backend::protocol::WEnum;
 use wayland_client::protocol::wl_surface::WlSurface;

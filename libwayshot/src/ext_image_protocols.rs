@@ -12,25 +12,19 @@ use std::sync::{Arc, RwLock};
 
 use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
 
-use image::{DynamicImage, ImageBuffer, Pixel};
-use memmap2::MmapMut;
+use image::{DynamicImage, ImageBuffer};
 
 use image::ColorType;
 
-use std::os::fd::{AsFd, AsRawFd};
+use std::os::fd::{AsFd};
 
-use std::{
-    fs::File,
-    time::{SystemTime, UNIX_EPOCH},
-};
-
-use std::os::fd::OwnedFd;
+use std::fs::File;
 
 use crate::WayshotConnection;
 use crate::WayshotError; // Removed WayshotBase import
 use crate::dispatch::FrameState;
 use crate::region::{Position, Region, Size, LogicalRegion};
-use crate::screencopy::create_shm_fd;
+use crate::screencopy::{create_shm_fd, FrameFormat};
 
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
@@ -46,24 +40,10 @@ pub struct ImageViewInfo {
 }
 
 #[allow(unused)]
-#[derive(Debug, Clone)]
-pub(crate) struct FrameInfo {
-    pub(crate) format: Format,
-    pub(crate) size: Size,
-    pub(crate) stride: u32,
-}
-
-impl FrameInfo {
-    pub(crate) fn byte_size(&self) -> u32 {
-        self.stride * self.size.height
-    }
-}
-
-#[allow(unused)]
 #[derive(Debug)]
 struct CaptureTopLevelData {
 	buffer: WlBuffer,
-	frame_info: FrameInfo,
+	frame_info: FrameFormat,
 	transform: wl_output::Transform,
 	mmap: Option<memmap2::MmapMut>, // Add mmap for pixel data
 }
@@ -74,7 +54,7 @@ pub(crate) struct CaptureOutputData {
 	
     pub(crate) buffer: WlBuffer,
 
-    pub(crate) frame_info: FrameInfo,
+    pub(crate) frame_info: FrameFormat,
 	pub(crate) color_type: ColorType, // added here
 	pub(crate) mmap: Option<memmap2::MmapMut>, // NEW: store mmap for image data
 	pub(crate) transform: wl_output::Transform,
@@ -313,7 +293,7 @@ impl crate::WayshotConnection {
             .as_ref()
             .expect("Should init");
         let source = img_manager.create_source(&output, qh, ());
-        let info = Arc::new(RwLock::new(FrameInfo {
+        let info = Arc::new(RwLock::new(FrameFormat {
             format: Format::Xrgb8888, // placeholder, will be set by protocol event
             size: Size { width: 0, height: 0 }, // placeholder
             stride: 0, // placeholder
@@ -425,7 +405,7 @@ impl crate::WayshotConnection {
             output,
             buffer,
             logical_region: logical_region.clone(),
-            frame_info: FrameInfo {
+            frame_info: FrameFormat {
                 format: frame_format,
                 size: Size {
                     width: logical_region.inner.size.width as u32,
@@ -619,7 +599,7 @@ impl crate::WayshotConnection {
 			.expect("Should init");
 		let source = img_manager.create_source(&handle, qh, ());
         // Provide a default FrameInfo since FrameInfo::default() does not exist
-        let info = Arc::new(RwLock::new(FrameInfo {
+        let info = Arc::new(RwLock::new(FrameFormat {
 			format: Format::Xrgb8888, // placeholder, will be set by protocol event
 			size: Size { width: 0, height: 0 }, // placeholder
 			stride: 0, // placeholder
@@ -719,7 +699,7 @@ impl crate::WayshotConnection {
 		Ok(CaptureTopLevelData {
 			transform,
 			buffer,
-			frame_info: FrameInfo {
+			frame_info: FrameFormat {
 				format: frame_format,
 				size: Size { width, height },
 				stride,

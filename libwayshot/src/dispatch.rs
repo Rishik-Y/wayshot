@@ -414,7 +414,7 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
 use wayland_client::event_created_child;
 
 use crate::WayshotConnection;
-use crate::ext_image_protocols::{CaptureInfo, FrameInfo, TopLevel}; // Add this import
+use crate::ext_image_protocols::{CaptureInfo, TopLevel}; // Add this import
 
 delegate_noop!(WayshotConnection: ignore ExtImageCaptureSourceV1);
 delegate_noop!(WayshotConnection: ignore ExtOutputImageCaptureSourceManagerV1);
@@ -529,14 +529,14 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, Arc<RwLock<CaptureInfo>>> for WayshotC
     }
 }
 
-impl Dispatch<ExtImageCopyCaptureSessionV1, Arc<RwLock<FrameInfo>>> for WayshotConnection {
+impl Dispatch<ExtImageCopyCaptureSessionV1, Arc<RwLock<FrameFormat>>> for WayshotConnection {
     fn event(
-        _state: &mut Self,
-        _proxy: &ExtImageCopyCaptureSessionV1,
-        event: <ExtImageCopyCaptureSessionV1 as Proxy>::Event,
-        data: &Arc<RwLock<FrameInfo>>,
-        _conn: &Connection,
-        _qhandle: &wayland_client::QueueHandle<Self>,
+		_state: &mut Self,
+		_proxy: &ExtImageCopyCaptureSessionV1,
+		event: <ExtImageCopyCaptureSessionV1 as Proxy>::Event,
+		data: &Arc<RwLock<FrameFormat>>,
+		_conn: &Connection,
+		_qhandle: &wayland_client::QueueHandle<Self>,
     ) {
         let mut frame_info = data.write().unwrap();
         match event {
