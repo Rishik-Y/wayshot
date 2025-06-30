@@ -70,14 +70,11 @@ pub(crate) struct CaptureOutputData {
     pub(crate) buffer: WlBuffer,
 
     pub(crate) frame_info: FrameInfo,
-
-    pub(crate) color_type: ColorType, // added here
-
-
+	pub(crate) color_type: ColorType, // added here
+	pub(crate) mmap: Option<memmap2::MmapMut>, // NEW: store mmap for image data
 	pub(crate) transform: wl_output::Transform,
 	pub(crate) logical_region: LogicalRegion, // replaces width, height, screen_position
 	pub(crate) physical_size: Size, // replaced real_width/real_height
-	pub(crate) mmap: Option<memmap2::MmapMut>, // NEW: store mmap for image data
 }
 
 #[derive(Debug, Clone)]
@@ -107,7 +104,7 @@ impl TopLevel {
 	// pub fn identifier(&self) -> &str {
 	// 	&self.identifier
 	// }
-	
+
     // pub fn handle(&self) -> &ExtForeignToplevelHandleV1 {
     //    &self.handle
     // }
@@ -135,11 +132,12 @@ impl CaptureInfo {
 }
 
 #[allow(unused)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct CaptureTopLevelData {
     buffer: WlBuffer,
     frame_info: FrameInfo,
     transform: wl_output::Transform,
+    mmap: Option<memmap2::MmapMut>, // Add mmap for pixel data
 }
 
 pub trait AreaSelectCallback {
@@ -640,26 +638,23 @@ impl crate::WayshotConnection {
 	) -> Result<ImageViewInfo, WayshotError> {
 		let mem_fd = ext_create_shm_fd().unwrap();
 		let mem_file = File::from(mem_fd);
-		let CaptureTopLevelData {
-			frame_info,
-			..
-		} = self.ext_capture_toplevel_inner(toplevel, option, mem_file.as_fd(), Some(&mem_file))?;
+		let mut capture = self.ext_capture_toplevel_inner(toplevel, option, mem_file.as_fd(), Some(&mem_file))?;
 
 		let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
-
-		let converter = crate::convert::create_converter(frame_info.format).unwrap();
+		let converter = crate::convert::create_converter(capture.frame_info.format).unwrap();
 		let color_type = converter.convert_inplace(&mut frame_mmap);
+		capture.mmap = Some(frame_mmap);
 
         // Use the full window as the region
         let region = Region {
             position: Position { x: 0, y: 0 },
-            size: frame_info.size,
+            size: capture.frame_info.size,
         };
 
 		Ok(ImageViewInfo {
-			data: frame_mmap.to_vec(),
-			width: frame_info.size.width,
-			height: frame_info.size.height,
+			data: capture.mmap.as_ref().unwrap().to_vec(),
+			width: capture.frame_info.size.width,
+			height: capture.frame_info.size.height,
 			color_type,
 			region,
 		})
@@ -726,12 +721,12 @@ impl crate::WayshotConnection {
 		let frame_format = info.format;
 		let frame_bytes = 4 * height * width;
 		if !matches!(
-            frame_format,
-            Format::Xbgr2101010
-                | Format::Abgr2101010
-                | Format::Argb8888
-                | Format::Xrgb8888
-                | Format::Xbgr8888
+			frame_format,
+			Format::Xbgr2101010
+				| Format::Abgr2101010
+				| Format::Argb8888
+				| Format::Xrgb8888
+				| Format::Xbgr8888
         ) {
 			return Err(WayshotError::NotSupportFormat);
 		}
@@ -803,6 +798,7 @@ impl crate::WayshotConnection {
 				size: Size { width, height },
 				stride,
 			},
+			mmap: None, // mmap will be set after return, just like Output
 		})
 	}
 }
@@ -829,5 +825,19 @@ impl TryFrom<&CaptureOutputData> for DynamicImage {
             }
             _ => Err(WayshotError::InvalidColor),
         }
+    }
+}
+
+impl TryFrom<&CaptureTopLevelData> for DynamicImage {
+    type Error = WayshotError;
+
+    fn try_from(value: &CaptureTopLevelData) -> Result<Self, WayshotError> {
+        let mmap = value.mmap.as_ref().ok_or(WayshotError::BufferTooSmall)?;
+        let width = value.frame_info.size.width;
+        let height = value.frame_info.size.height;
+        // Assume RGBA8 for toplevel, adjust if you add color_type
+        let buffer = ImageBuffer::from_vec(width, height, mmap.to_vec())
+            .ok_or(WayshotError::BufferTooSmall)?;
+        Ok(DynamicImage::ImageRgba8(buffer))
     }
 }
