@@ -30,12 +30,7 @@ use crate::WayshotConnection;
 use crate::WayshotError; // Removed WayshotBase import
 use crate::dispatch::FrameState;
 use crate::region::{Position, Region, Size, LogicalRegion};
-
-use nix::{
-    fcntl,
-    sys::{memfd, mman, stat},
-    unistd,
-};
+use crate::screencopy::create_shm_fd;
 
 /// Image view means what part to use
 /// When use the project, every time you will get a picture of the full screen,
@@ -64,9 +59,19 @@ impl FrameInfo {
     }
 }
 
+#[allow(unused)]
+#[derive(Debug)]
+struct CaptureTopLevelData {
+	buffer: WlBuffer,
+	frame_info: FrameInfo,
+	transform: wl_output::Transform,
+	mmap: Option<memmap2::MmapMut>, // Add mmap for pixel data
+}
+
 #[derive(Debug)]
 pub(crate) struct CaptureOutputData {
     pub(crate) output: WlOutput,
+	
     pub(crate) buffer: WlBuffer,
 
     pub(crate) frame_info: FrameInfo,
@@ -129,15 +134,6 @@ impl CaptureInfo {
     pub(crate) fn state(&self) -> FrameState {
         self.state
     }
-}
-
-#[allow(unused)]
-#[derive(Debug)]
-struct CaptureTopLevelData {
-    buffer: WlBuffer,
-    frame_info: FrameInfo,
-    transform: wl_output::Transform,
-    mmap: Option<memmap2::MmapMut>, // Add mmap for pixel data
 }
 
 pub trait AreaSelectCallback {
@@ -236,76 +232,6 @@ impl AreaShotInfo {
     }
 }
 
-/// capture_output_frame.
-pub(crate) fn ext_create_shm_fd() -> std::io::Result<OwnedFd> {
-    // Only try memfd on linux and freebsd.
-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-    loop {
-        // Create a file that closes on successful execution and seal it's operations.
-        match memfd::memfd_create(
-            c"wayshot",
-            memfd::MFdFlags::MFD_CLOEXEC | memfd::MFdFlags::MFD_ALLOW_SEALING,
-        ) {
-            Ok(fd) => {
-                // This is only an optimization, so ignore errors.
-                // F_SEAL_SRHINK = File cannot be reduced in size.
-                // F_SEAL_SEAL = Prevent further calls to fcntl().
-                let _ = fcntl::fcntl(
-                    fd.as_fd(),
-                    fcntl::F_ADD_SEALS(
-                        fcntl::SealFlag::F_SEAL_SHRINK | fcntl::SealFlag::F_SEAL_SEAL,
-                    ),
-                );
-                return Ok(fd);
-            }
-            Err(nix::errno::Errno::EINTR) => continue,
-            Err(nix::errno::Errno::ENOSYS) => break,
-            Err(errno) => return Err(std::io::Error::from(errno)),
-        }
-    }
-
-    // Fallback to using shm_open.
-    let sys_time = SystemTime::now();
-    let mut mem_file_handle = format!(
-        "/wayshot-{}",
-        sys_time.duration_since(UNIX_EPOCH).unwrap().subsec_nanos()
-    );
-    loop {
-        match mman::shm_open(
-            // O_CREAT = Create file if does not exist.
-            // O_EXCL = Error if create and file exists.
-            // O_RDWR = Open for reading and writing.
-            // O_CLOEXEC = Close on successful execution.
-            // S_IRUSR = Set user read permission bit .
-            // S_IWUSR = Set user write permission bit.
-            mem_file_handle.as_str(),
-            fcntl::OFlag::O_CREAT
-                | fcntl::OFlag::O_EXCL
-                | fcntl::OFlag::O_RDWR
-                | fcntl::OFlag::O_CLOEXEC,
-            stat::Mode::S_IRUSR | stat::Mode::S_IWUSR,
-        ) {
-            Ok(fd) => match mman::shm_unlink(mem_file_handle.as_str()) {
-                Ok(_) => return Ok(fd),
-                Err(errno) => match unistd::close(fd.as_raw_fd()) {
-                    Ok(_) => return Err(std::io::Error::from(errno)),
-                    Err(errno) => return Err(std::io::Error::from(errno)),
-                },
-            },
-            Err(nix::errno::Errno::EEXIST) => {
-                // If a file with that handle exists then change the handle
-                mem_file_handle = format!(
-                    "/wayshot-{}",
-                    sys_time.duration_since(UNIX_EPOCH).unwrap().subsec_nanos()
-                );
-                continue;
-            }
-            Err(nix::errno::Errno::EINTR) => continue,
-            Err(errno) => return Err(std::io::Error::from(errno)),
-        }
-    }
-}
-
 use std::ops::Deref;
 
 // Implementation of WayshotConnection methods related to ext_image_protocols
@@ -316,7 +242,7 @@ impl crate::WayshotConnection {
         option: CaptureOption,
         output: crate::output::OutputInfo,
     ) -> std::result::Result<ImageViewInfo, crate::WayshotError> {
-        let mem_fd = ext_create_shm_fd().unwrap();
+        let mem_fd = create_shm_fd().unwrap();
         let mem_file = File::from(mem_fd);
         let mut capture_data = self.ext_capture_output_inner(
             output.clone(),
@@ -537,7 +463,7 @@ impl crate::WayshotConnection {
 
         let mut data_list = vec![];
         for data in outputs.into_iter() {
-            let mem_fd = ext_create_shm_fd().unwrap();
+            let mem_fd = create_shm_fd().unwrap();
             let mem_file = File::from(mem_fd);
             let mut data =
                 self.ext_capture_output_inner(data, option, mem_file.as_fd(), Some(&mem_file))?;
@@ -636,7 +562,7 @@ impl crate::WayshotConnection {
 		option: CaptureOption,
 		toplevel: TopLevel,
 	) -> Result<ImageViewInfo, WayshotError> {
-		let mem_fd = ext_create_shm_fd().unwrap();
+		let mem_fd = create_shm_fd().unwrap();
 		let mem_file = File::from(mem_fd);
 		let mut capture = self.ext_capture_toplevel_inner(toplevel, option, mem_file.as_fd(), Some(&mem_file))?;
 
