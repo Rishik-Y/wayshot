@@ -9,6 +9,7 @@ use wayland_client::{
 
 pub type Result<T, E = WayshotError> = result::Result<T, E>;
 
+/// Error type for wayshot.
 #[derive(Error, Debug)]
 pub enum WayshotError {
     #[error("no outputs supplied")]

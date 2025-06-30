@@ -69,13 +69,33 @@ pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>)
     }
 }
 
+pub fn ext_capture_toplevel(
+	state: &mut WayshotConnection,
+	use_stdout: bool,
+	pointer: bool,
+) -> Result<WayshotResult, WayshotImageWriteError> {
+	let toplevels = state.toplevels();
+	let names: Vec<String> = toplevels.iter().map(|info| info.id_and_title()).collect();
+
+	let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+		.with_prompt("Choose Application")
+		.default(0)
+		.items(&names)
+		.interact()?;
+
+	let toplevel = toplevels[selection].clone();
+	let image_info = state.ext_capture_toplevel2(pointer.to_capture_option(), toplevel)?;
+
+	write_to_image(image_info, use_stdout)
+}
+
 pub fn ext_capture_output(
     state: &mut WayshotConnection,
     output: Option<String>,
     use_stdout: bool,
     pointer: bool,
 ) -> eyre::Result<WayshotResult, WayshotImageWriteError> {
-    let outputs = state.outputs();
+    let outputs = state.vector_of_Outputs();
     let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
 
     let selection = match output {
@@ -114,10 +134,11 @@ fn write_to_image(
     image_info: ImageViewInfo,
     use_stdout: bool,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
+    let color_type = image_info.color_type;
     if use_stdout {
-        write_to_stdout(image_info)
+        write_to_stdout(image_info, color_type)
     } else {
-        write_to_file(image_info)
+        write_to_file(image_info, color_type)
     }
 }
 
@@ -129,9 +150,9 @@ fn write_to_stdout(
         data,
         width,
         height,
-        color_type,
         ..
     }: ImageViewInfo,
+    color_type: image::ColorType,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let stdout = stdout();
     let mut writer = BufWriter::new(stdout.lock());
@@ -144,9 +165,9 @@ fn write_to_file(
         data,
         width,
         height,
-        color_type,
         ..
     }: ImageViewInfo,
+    color_type: image::ColorType,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
     let file = random_file_path();
     let mut writer =
@@ -189,17 +210,17 @@ pub fn ext_capture_area(
         data,
         width: img_width,
         height: img_height,
-        color_type,
         region:
             Region {
                 position: Position { x, y },
                 size: Size { width, height },
             },
+        color_type,
     } = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
-                connection: w_conn.connection(),
-                globals: w_conn.globals(),
+                connection: &w_conn.conn,
+                globals: &w_conn.globals,
             }),
             libwaysip::SelectionType::Area,
         )
@@ -241,17 +262,17 @@ pub fn ext_capture_color(
         data,
         width: img_width,
         height: img_height,
-        color_type,
         region:
             Region {
                 position: Position { x, y },
                 size: Size { width, height },
             },
+        color_type,
     } = state.ext_capture_area2(CaptureOption::None, |w_conn: &WayshotConnection| {
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
-                connection: w_conn.connection(),
-                globals: w_conn.globals(),
+                connection: &w_conn.conn,
+                globals: &w_conn.globals,
             }),
             libwaysip::SelectionType::Point,
         )

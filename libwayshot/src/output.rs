@@ -1,8 +1,6 @@
 use crate::region::{LogicalRegion, Position, Size};
 use std::fmt::Display;
-use std::sync::OnceLock;
 use wayland_client::protocol::{wl_output, wl_output::WlOutput};
-use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_v1::ZxdgOutputV1;
 
 /// Represents an accessible wayland output.
 ///
