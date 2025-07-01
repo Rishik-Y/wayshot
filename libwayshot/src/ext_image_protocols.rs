@@ -585,6 +585,25 @@ impl crate::WayshotConnection {
 		})
 	}
 
+	/// Capture a single output
+	pub fn ext_capture_toplevel2_DynamicImage(
+		&mut self,
+		option: CaptureOption,
+		toplevel: TopLevel,
+	) -> Result<DynamicImage, WayshotError> {
+		let mem_fd = create_shm_fd().unwrap();
+		let mem_file = File::from(mem_fd);
+		let mut capture = self.ext_capture_toplevel_inner(toplevel, option, mem_file.as_fd(), Some(&mem_file))?;
+
+		let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
+		let converter = crate::convert::create_converter(capture.frame_info.format).unwrap();
+		converter.convert_inplace(&mut frame_mmap);
+		capture.mmap = Some(frame_mmap);
+
+        // Use TryFrom to convert to DynamicImage
+        (&capture).try_into()
+	}
+
 	fn ext_capture_toplevel_inner<T: AsFd>(
 		&mut self,
 		TopLevel { handle, .. }: TopLevel,
