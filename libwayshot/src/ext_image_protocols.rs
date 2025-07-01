@@ -51,7 +51,7 @@ struct CaptureTopLevelData {
 #[derive(Debug)]
 pub(crate) struct CaptureOutputData {
     pub(crate) output: WlOutput,
-	
+
     pub(crate) buffer: WlBuffer,
 
     pub(crate) frame_info: FrameFormat,
@@ -85,14 +85,6 @@ impl TopLevel {
 	pub fn id_and_title(&self) -> String {
 		format!("{} {}", self.app_id, self.title)
 	}
-
-	// pub fn identifier(&self) -> &str {
-	// 	&self.identifier
-	// }
-
-    // pub fn handle(&self) -> &ExtForeignToplevelHandleV1 {
-    //    &self.handle
-    // }
 }
 
 pub(crate) struct CaptureInfo {
@@ -250,6 +242,33 @@ impl crate::WayshotConnection {
             region,
         })
     }
+
+	/// Capture a single output and return a DynamicImage
+	pub fn ext_capture_single_output_DynamicImage(
+		&mut self,
+		option: CaptureOption,
+		output: crate::output::OutputInfo,
+	) -> std::result::Result<DynamicImage, crate::WayshotError> {
+		let mem_fd = create_shm_fd().unwrap();
+		let mem_file = File::from(mem_fd);
+		let mut capture_data = self.ext_capture_output_inner(
+			output.clone(),
+		 option,
+		 mem_file.as_fd(),
+		 Some(&mem_file),
+		)?;
+
+		let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
+
+		let converter = crate::convert::create_converter(capture_data.frame_info.format).unwrap();
+		let color_type = converter.convert_inplace(&mut frame_mmap);
+
+		capture_data.color_type = color_type;
+		capture_data.mmap = Some(frame_mmap);
+
+        // Use TryFrom to convert to DynamicImage
+      	(&capture_data).try_into()
+	}
 
     fn ext_capture_output_inner<T: AsFd>(
         &mut self,

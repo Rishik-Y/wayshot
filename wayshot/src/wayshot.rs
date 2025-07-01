@@ -131,17 +131,67 @@ fn main() -> Result<()> {
                     return Ok(());
                 }
 
-                let result = if cli.geometry {
-                    ext_capture_area(&mut state, stdout_print, cursor)
-                } else if cli.color {
-					ext_capture_color(&mut state)
-				} else if cli.experimental {
-					ext_capture_toplevel(&mut state, stdout_print, cursor)
-				} else {
-                    ext_capture_output(&mut state, output, stdout_print, cursor)
+                let outputs = state.vector_of_Outputs();
+                let output_info = if let Some(ref output_name) = output {
+                    outputs.into_iter().find(|o| o.name() == output_name)
+                } else {
+                    outputs.into_iter().next()
                 };
+                if let Some(_output_info) = output_info {
+                    let image_result = ext_capture_output_DynamicImage(
+                        &mut state,
+                        output.clone(),
+                        stdout_print,
+                        cursor,
+                    );
+                    match image_result {
+                        Ok(image_buffer) => {
+                            let mut image_buf: Option<Cursor<Vec<u8>>> = None;
+                            if let Some(f) = file.as_ref() {
+                                if let Err(e) = image_buffer.save(&f) {
+                                    tracing::error!("Failed to save file '{}': {}", f.display(), e);
+                                }
+                            }
+                            if stdout_print {
+                                let mut buffer = Cursor::new(Vec::new());
+                                image_buffer.write_to(&mut buffer, encoding.into())?;
+                                let stdout = io::stdout();
+                                let mut writer = BufWriter::new(stdout.lock());
+                                writer.write_all(buffer.get_ref())?;
+                                writer.flush()?;
+                                image_buf = Some(buffer);
+                            }
+                            if clipboard {
+                                clipboard_daemonize(match image_buf {
+                                    Some(buf) => buf,
+                                    None => {
+                                        let mut buffer = Cursor::new(Vec::new());
+                                        image_buffer.write_to(&mut buffer, encoding.into())?;
+                                        buffer
+                                    }
+                                })?;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to capture output: {}", e);
+                        }
+                    }
+                } else {
+                    tracing::error!("No output found for ext_image capture");
+                }
 
-                notify_result(result);
+                //let result = if cli.geometry {
+                //    ext_capture_area(&mut state, stdout_print, cursor)
+                //} else if cli.color {
+				//	ext_capture_color(&mut state)
+				//} else if cli.experimental {
+				//	ext_capture_toplevel(&mut state, stdout_print, cursor)
+				//} else {
+                //    ext_capture_output(&mut state, output, stdout_print, cursor)
+				//	//ext_capture_output_DynamicImage(&mut state, output, stdout_print, cursor)
+				//};
+				//
+                //notify_result(result);
                 return Ok(());
             } else {
                 tracing::info!("ext_image protocol not available, using wlr_screencopy");

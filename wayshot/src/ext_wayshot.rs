@@ -116,6 +116,34 @@ pub fn ext_capture_output(
     write_to_image(image_info, use_stdout)
 }
 
+pub fn ext_capture_output_DynamicImage(
+	state: &mut WayshotConnection,
+	output: Option<String>,
+	use_stdout: bool,
+	pointer: bool,
+) -> eyre::Result<image::DynamicImage, WayshotImageWriteError> {
+	let outputs = state.vector_of_Outputs();
+	let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
+
+	let selection = match output {
+		Some(name) => names
+			.iter()
+			.position(|tname| *tname == name)
+			.ok_or(WayshotImageWriteError::OutputNotExist)?,
+		None => FuzzySelect::with_theme(&ColorfulTheme::default())
+			.with_prompt("Choose Screen")
+			.default(0)
+			.items(&names)
+			.interact()?,
+	};
+
+	let output = outputs[selection].clone();
+	let img = state
+		.ext_capture_single_output_DynamicImage(pointer.to_capture_option(), output)
+		.map_err(WayshotImageWriteError::WaylandError)?;
+	Ok(img)
+}
+
 trait ToCaptureOption {
     fn to_capture_option(self) -> CaptureOption;
 }
