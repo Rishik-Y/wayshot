@@ -69,26 +69,6 @@ pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>)
     }
 }
 
-pub fn ext_capture_toplevel(
-	state: &mut WayshotConnection,
-	use_stdout: bool,
-	pointer: bool,
-) -> Result<WayshotResult, WayshotImageWriteError> {
-	let toplevels = state.toplevels();
-	let names: Vec<String> = toplevels.iter().map(|info| info.id_and_title()).collect();
-
-	let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
-		.with_prompt("Choose Application")
-		.default(0)
-		.items(&names)
-		.interact()?;
-
-	let toplevel = toplevels[selection].clone();
-	let image_info = state.ext_capture_toplevel2(pointer.to_capture_option(), toplevel)?;
-
-	write_to_image(image_info, use_stdout)
-}
-
 pub fn ext_capture_toplevel_DynamicImage(
 	state: &mut WayshotConnection,
 	use_stdout: bool,
@@ -108,33 +88,6 @@ pub fn ext_capture_toplevel_DynamicImage(
 		.ext_capture_toplevel2_DynamicImage(pointer.to_capture_option(), toplevel)
 		.map_err(WayshotImageWriteError::WaylandError)?;
 	Ok(img)
-}
-
-pub fn ext_capture_output(
-    state: &mut WayshotConnection,
-    output: Option<String>,
-    use_stdout: bool,
-    pointer: bool,
-) -> eyre::Result<WayshotResult, WayshotImageWriteError> {
-    let outputs = state.vector_of_Outputs();
-    let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
-
-    let selection = match output {
-        Some(name) => names
-            .iter()
-            .position(|tname| *tname == name)
-            .ok_or(WayshotImageWriteError::OutputNotExist)?,
-        None => FuzzySelect::with_theme(&ColorfulTheme::default())
-            .with_prompt("Choose Screen")
-            .default(0)
-            .items(&names)
-            .interact()?,
-    };
-
-    let output = outputs[selection].clone();
-    let image_info = state.ext_capture_single_output(pointer.to_capture_option(), output)?;
-
-    write_to_image(image_info, use_stdout)
 }
 
 pub fn ext_capture_output_DynamicImage(
@@ -192,7 +145,7 @@ fn write_to_image(
 }
 
 use image::codecs::png::PngEncoder;
-use std::io::{BufWriter, Write, stdout};
+use std::io::{BufWriter, stdout};
 
 fn write_to_stdout(
     ImageViewInfo {
@@ -249,60 +202,6 @@ pub static SAVEPATH: LazyLock<PathBuf> = LazyLock::new(|| {
     }
     targetpath
 });
-
-pub fn ext_capture_area(
-    state: &mut WayshotConnection,
-    use_stdout: bool,
-    pointer: bool,
-) -> Result<WayshotResult, WayshotImageWriteError> {
-    let ImageViewInfo {
-        data,
-        width: img_width,
-        height: img_height,
-        region:
-            Region {
-                position: Position { x, y },
-                size: Size { width, height },
-            },
-        color_type,
-    } = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
-        let info = libwaysip::get_area(
-            Some(libwaysip::WaysipConnection {
-                connection: &w_conn.conn,
-                globals: &w_conn.globals,
-            }),
-            libwaysip::SelectionType::Area,
-        )
-        .map_err(|e| libwayshot::error::WayshotError::CaptureFailed(e.to_string()))?
-        .ok_or(libwayshot::error::WayshotError::CaptureFailed(
-            "Failed to capture the area".to_string(),
-        ))?;
-
-        // Map the Result<LogicalRegion> directly to Result<Region>
-        waysip_to_region(info.size(), info.left_top_point())
-            .map(|logical_region| logical_region.inner)
-    })?;
-
-    let mut buff = std::io::Cursor::new(Vec::new());
-    PngEncoder::new(&mut buff).write_image(&data, img_width, img_height, color_type.into())?;
-    let img = image::load_from_memory_with_format(buff.get_ref(), image::ImageFormat::Png).unwrap();
-    let clipimage = img.view(x as u32, y as u32, width as u32, height as u32);
-    if use_stdout {
-        let mut buff = std::io::Cursor::new(Vec::new());
-        clipimage
-            .to_image()
-            .write_to(&mut buff, image::ImageFormat::Png)?;
-        let content = buff.get_ref();
-        let stdout = stdout();
-        let mut writer = BufWriter::new(stdout.lock());
-        writer.write_all(content)?;
-        Ok(WayshotResult::StdoutSucceeded)
-    } else {
-        let file = random_file_path();
-        clipimage.to_image().save(&file)?;
-        Ok(WayshotResult::SaveToFile(file))
-    }
-}
 
 pub fn ext_capture_area_DynamicImage(
 	state: &mut WayshotConnection,
