@@ -13,8 +13,6 @@ use libwayshot::region::{Position, Region, Size};
 
 #[derive(Debug, Clone)]
 pub enum WayshotResult {
-    StdoutSucceeded,
-    SaveToFile { file: PathBuf, target: String },
     ColorSucceeded,
     OutputCaptured { name: String },
     ToplevelCaptured { name: String },
@@ -42,15 +40,6 @@ pub enum WayshotImageWriteError {
 pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>) {
     use notify_rust::Notification;
     match shot_result {
-        Ok(WayshotResult::SaveToFile { file, target }) => {
-            let file_name = file.to_string_lossy().to_string();
-            let _ = Notification::new()
-                .summary("File Saved")
-                .body(format!("File saved to {file:?} (Target: {target})").as_str())
-                .icon(&file_name)
-                .timeout(TIMEOUT)
-                .show();
-        }
         Ok(WayshotResult::OutputCaptured { name }) => {
             let _ = Notification::new()
                 .summary("Screenshot Taken")
@@ -75,8 +64,14 @@ pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>)
                 .timeout(TIMEOUT)
                 .show();
         }
-        Ok(WayshotResult::ColorSucceeded) => {}
-        Ok(WayshotResult::StdoutSucceeded) => {}
+        Ok(WayshotResult::ColorSucceeded) => {
+            let _ = Notification::new()
+                .summary("Screenshot Captured")
+                .body("Type: Pixel Color grab")
+                .icon(SUCCEED_IMAGE)
+                .timeout(TIMEOUT)
+                .show();
+        }
         Err(e) => {
             let _ = Notification::new()
                 .summary("Screenshot Failed")
