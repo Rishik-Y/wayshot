@@ -99,7 +99,7 @@ pub fn ext_capture_toplevel(
 
 	let toplevel = toplevels[selection].clone();
 	let img = state
-		.ext_capture_toplevel2_DynamicImage(pointer.to_capture_option(), toplevel)
+		.ext_capture_toplevel2(pointer.to_capture_option(), toplevel)
 		.map_err(WayshotImageWriteError::WaylandError)?;
 	Ok(img)
 }
@@ -127,7 +127,7 @@ pub fn ext_capture_output(
 
 	let output = outputs[selection].clone();
 	let img = state
-		.ext_capture_single_output_DynamicImage(pointer.to_capture_option(), output)
+		.ext_capture_single_output(pointer.to_capture_option(), output)
 		.map_err(WayshotImageWriteError::WaylandError)?;
 	Ok(img)
 }
