@@ -26,19 +26,6 @@ use crate::dispatch::FrameState;
 use crate::region::{Position, Region, Size, LogicalRegion};
 use crate::screencopy::{create_shm_fd, FrameFormat};
 
-/// Image view means what part to use
-/// When use the project, every time you will get a picture of the full screen,
-/// and when you do area screenshot, This lib will also provide you with the view of the selected
-/// part
-#[derive(Debug, Clone)]
-pub struct ImageViewInfo {
-    pub data: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-    pub color_type: ColorType, // add this field
-    pub region: Region,
-}
-
 #[allow(unused)]
 #[derive(Debug)]
 struct CaptureTopLevelData {
