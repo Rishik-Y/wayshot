@@ -304,6 +304,51 @@ pub fn ext_capture_area(
     }
 }
 
+pub fn ext_capture_area_DynamicImage(
+	state: &mut WayshotConnection,
+	use_stdout: bool,
+	pointer: bool,
+) -> Result<DynamicImage, WayshotImageWriteError> {
+	let ImageViewInfo {
+		data,
+		width: img_width,
+		height: img_height,
+		region:
+		Region {
+			position: Position { x, y },
+			size: Size { width, height },
+		},
+		color_type: _, // No need to match on color_type here
+	} = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
+		let info = libwaysip::get_area(
+			Some(libwaysip::WaysipConnection {
+				connection: &w_conn.conn,
+				globals: &w_conn.globals,
+			}),
+			libwaysip::SelectionType::Area,
+		)
+			.map_err(|e| libwayshot::error::WayshotError::CaptureFailed(e.to_string()))?
+			.ok_or(libwayshot::error::WayshotError::CaptureFailed(
+				"Failed to capture the area".to_string(),
+			))?;
+
+		// Map the Result<LogicalRegion> directly to Result<Region>
+		waysip_to_region(info.size(), info.left_top_point())
+			.map(|logical_region| logical_region.inner)
+	})?;
+
+	// Always use RGBA8, as ext_capture_area2_DynamicImage already does the conversion
+	let buffer = image::ImageBuffer::from_vec(img_width, img_height, data)
+		.ok_or(ImageError::Parameter(
+			image::error::ParameterError::from_kind(
+				image::error::ParameterErrorKind::DimensionMismatch,
+			),
+		))?;
+	let full_img = DynamicImage::ImageRgba8(buffer);
+	let cropped = full_img.crop_imm(x as u32, y as u32, width as u32, height as u32);
+	Ok(cropped)
+}
+
 pub fn ext_capture_color(
     state: &mut WayshotConnection,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
