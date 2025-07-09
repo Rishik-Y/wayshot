@@ -122,68 +122,74 @@ fn main() -> Result<()> {
             if has_ext_image && testing {
                 tracing::info!("Using ext_image protocol");
 
-				let stdout = io::stdout();
-				let mut writer = BufWriter::new(stdout.lock());
+                let stdout = io::stdout();
+                let mut writer = BufWriter::new(stdout.lock());
 
-				if cli.list_outputs {
-					let valid_outputs = state.get_all_outputs();
-					for output in valid_outputs {
-						writeln!(writer, "{}", output.name)?;
-					}
-					writer.flush()?;
-					return Ok(());
-				}
+                if cli.list_outputs {
+                    let valid_outputs = state.get_all_outputs();
+                    for output in valid_outputs {
+                        writeln!(writer, "{}", output.name)?;
+                    }
+                    writer.flush()?;
+                    return Ok(());
+                }
 
-				if cli.list_outputs_info {
-					state.print_displays_info();
-					return Ok(());
-				}
+                if cli.list_outputs_info {
+                    state.print_displays_info();
+                    return Ok(());
+                }
 
-                let outputs = state.vector_of_Outputs();
-                let output_info = if let Some(ref output_name) = output {
-                    outputs.into_iter().find(|o| o.name() == output_name)
-                } else {
-                    outputs.into_iter().next()
-                };
-                if let Some(_output_info) = output_info {
-                    let image_result = ext_capture_area_DynamicImage(
-                        &mut state,
-                        stdout_print,
-                        cursor,
-                    );
-                    match image_result {
-                        Ok(image_buffer) => {
-                            let mut image_buf: Option<Cursor<Vec<u8>>> = None;
-                            if let Some(f) = file.as_ref() {
-                                if let Err(e) = image_buffer.save(&f) {
-                                    tracing::error!("Failed to save file '{}': {}", f.display(), e);
-                                }
-                            }
-							
-                            if stdout_print {
-                                let mut buffer = Cursor::new(Vec::new());
-                                image_buffer.write_to(&mut buffer, encoding.into())?;
-                                writer.write_all(buffer.get_ref())?;
-                                image_buf = Some(buffer);
-                            }
-							
-                            if clipboard {
-                                clipboard_daemonize(match image_buf {
-                                    Some(buf) => buf,
-                                    None => {
-                                        let mut buffer = Cursor::new(Vec::new());
-                                        image_buffer.write_to(&mut buffer, encoding.into())?;
-                                        buffer
-                                    }
-                                })?;
-                            }
-                        }
+                // EXT protocol logic for -g, -t, -o, --color
+                let image_result = if cli.color {
+                    // ext_capture_color does not return a DynamicImage, so handle separately
+                    match ext_capture_color(&mut state) {
+                        Ok(_) => return Ok(()),
                         Err(e) => {
-                            tracing::error!("Failed to capture output: {}", e);
+                            tracing::error!("Failed to capture color: {}", e);
+                            return Ok(());
                         }
                     }
+                } else if cli.geometry {
+                    ext_capture_area_DynamicImage(&mut state, stdout_print, cursor)
+                } else if cli.toplevel {
+                    ext_capture_toplevel_DynamicImage(&mut state, stdout_print, cursor)
+                } else if output.as_ref().is_some() || cli.choose_output {
+                    ext_capture_output_DynamicImage(&mut state, output.clone(), stdout_print, cursor).map_err(|e| e.into())
                 } else {
-                    tracing::error!("No output found for ext_image capture");
+                    // If no flag is provided, default to output selection (choose_output = true)
+                    ext_capture_output_DynamicImage(&mut state, None, stdout_print, cursor).map_err(|e| e.into())
+                };
+
+                match image_result {
+                    Ok(image_buffer) => {
+                        let mut image_buf: Option<Cursor<Vec<u8>>> = None;
+                        if let Some(f) = file.as_ref() {
+                            if let Err(e) = image_buffer.save(&f) {
+                                tracing::error!("Failed to save file '{}': {}", f.display(), e);
+                            }
+                        }
+
+                        if stdout_print {
+                            let mut buffer = Cursor::new(Vec::new());
+                            image_buffer.write_to(&mut buffer, encoding.into())?;
+                            writer.write_all(buffer.get_ref())?;
+                            image_buf = Some(buffer);
+                        }
+
+                        if clipboard {
+                            clipboard_daemonize(match image_buf {
+                                Some(buf) => buf,
+                                None => {
+                                    let mut buffer = Cursor::new(Vec::new());
+                                    image_buffer.write_to(&mut buffer, encoding.into())?;
+                                    buffer
+                                }
+                            })?;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to capture output: {}", e);
+                    }
                 }
 
                 //let result = if cli.geometry {
@@ -194,7 +200,6 @@ fn main() -> Result<()> {
 				//	ext_capture_toplevel(&mut state, stdout_print, cursor)
 				//} else {
                 //    ext_capture_output(&mut state, output, stdout_print, cursor)
-				//	//ext_capture_output_DynamicImage(&mut state, output, stdout_print, cursor)
 				//};
 				//
                 //notify_result(result);
