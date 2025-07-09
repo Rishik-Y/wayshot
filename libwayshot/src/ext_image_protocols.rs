@@ -208,68 +208,6 @@ use std::ops::Deref;
 
 // Implementation of WayshotConnection methods related to ext_image_protocols
 impl crate::WayshotConnection {
-    /// Capture a single output
-    pub fn ext_capture_single_output(
-        &mut self,
-        option: CaptureOption,
-        output: crate::output::OutputInfo,
-    ) -> std::result::Result<ImageViewInfo, crate::WayshotError> {
-        let mem_fd = create_shm_fd().unwrap();
-        let mem_file = File::from(mem_fd);
-        let mut capture_data = self.ext_capture_output_inner(
-            output.clone(),
-            option,
-            mem_file.as_fd(),
-            Some(&mem_file),
-        )?;
-
-        let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
-
-        let converter = crate::convert::create_converter(capture_data.frame_info.format).unwrap();
-        let color_type = converter.convert_inplace(&mut frame_mmap);
-
-        capture_data.color_type = color_type;
-        capture_data.mmap = Some(frame_mmap);
-
-        // Create a full screen region representing the entire output
-        let region = output.logical_region.inner.clone();
-
-        Ok(ImageViewInfo {
-            data: capture_data.mmap.as_ref().unwrap().to_vec(),
-            width: capture_data.logical_region.inner.size.width,
-            height: capture_data.logical_region.inner.size.height,
-            color_type: capture_data.color_type, // pass color_type
-            region,
-        })
-    }
-
-	/// Capture a single output and return a DynamicImage
-	pub fn ext_capture_single_output_DynamicImage(
-		&mut self,
-		option: CaptureOption,
-		output: crate::output::OutputInfo,
-	) -> std::result::Result<DynamicImage, crate::WayshotError> {
-		let mem_fd = create_shm_fd().unwrap();
-		let mem_file = File::from(mem_fd);
-		let mut capture_data = self.ext_capture_output_inner(
-			output.clone(),
-		 option,
-		 mem_file.as_fd(),
-		 Some(&mem_file),
-		)?;
-
-		let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
-
-		let converter = crate::convert::create_converter(capture_data.frame_info.format).unwrap();
-		let color_type = converter.convert_inplace(&mut frame_mmap);
-
-		capture_data.color_type = color_type;
-		capture_data.mmap = Some(frame_mmap);
-
-        // Use TryFrom to convert to DynamicImage
-      	(&capture_data).try_into()
-	}
-
     fn ext_capture_output_inner<T: AsFd>(
         &mut self,
         output_info: crate::output::OutputInfo,
@@ -442,6 +380,33 @@ impl crate::WayshotConnection {
         })
     }
 
+	/// Capture a single output and return a DynamicImage
+	pub fn ext_capture_single_output_DynamicImage(
+		&mut self,
+		option: CaptureOption,
+		output: crate::output::OutputInfo,
+	) -> std::result::Result<DynamicImage, crate::WayshotError> {
+		let mem_fd = create_shm_fd().unwrap();
+		let mem_file = File::from(mem_fd);
+		let mut capture_data = self.ext_capture_output_inner(
+			output.clone(),
+			option,
+			mem_file.as_fd(),
+			Some(&mem_file),
+		)?;
+
+		let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
+
+		let converter = crate::convert::create_converter(capture_data.frame_info.format).unwrap();
+		let color_type = converter.convert_inplace(&mut frame_mmap);
+
+		capture_data.color_type = color_type;
+		capture_data.mmap = Some(frame_mmap);
+
+		// Use TryFrom to convert to DynamicImage
+		(&capture_data).try_into()
+	}
+
     pub fn ext_capture_area2<F>(
         &mut self,
         option: CaptureOption,
@@ -554,167 +519,7 @@ impl crate::WayshotConnection {
             region: area,
         })
     }
-
-	pub fn ext_capture_area2_DynamicImage<F>(
-		&mut self,
-		option: CaptureOption,
-		callback: F,
-	) -> std::result::Result<DynamicImage, crate::WayshotError>
-	where
-		F: AreaSelectCallback,
-	{
-		use crate::dispatch::XdgShellState;
-		use wayland_client::{protocol::wl_surface::WlSurface, EventQueue};
-		use wayland_protocols::xdg::shell::client::{xdg_surface::XdgSurface, xdg_toplevel::XdgToplevel};
-		use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
-		use wayland_client::protocol::wl_compositor::WlCompositor;
-		use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
-		use tracing::debug;
-
-		let outputs = self.vector_of_Outputs().clone();
-
-		let mut data_list = vec![];
-		for data in outputs.into_iter() {
-			let mem_fd = create_shm_fd().unwrap();
-			let mem_file = File::from(mem_fd);
-			let mut data =
-				self.ext_capture_output_inner(data, option, mem_file.as_fd(), Some(&mem_file))?;
-			// Set mmap in CaptureOutputData
-			let frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
-			data.mmap = Some(frame_mmap);
-			data_list.push(AreaShotInfo { data, mem_file })
-		}
-
-		let mut state = XdgShellState::new();
-		let mut event_queue: EventQueue<XdgShellState> = self.conn.new_event_queue();
-		let globals = &self.globals;
-		let qh = event_queue.handle();
-
-		let compositor = globals.bind::<WlCompositor, _, _>(&qh, 3..=3, ())?;
-		let xdg_wm_base = globals.bind::<XdgWmBase, _, _>(&qh, 1..=1, ())?;
-		let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ())?;
-
-		let mut xdg_surfaces: Vec<(WlSurface, XdgSurface, XdgToplevel)> =
-			Vec::with_capacity(data_list.len());
-		for AreaShotInfo { data, .. } in data_list.iter() {
-			let CaptureOutputData {
-				output,
-				buffer,
-				physical_size,
-				transform,
-				..
-			} = data;
-			let surface = compositor.create_surface(&qh, ());
-
-			let xdg_surface = xdg_wm_base.get_xdg_surface(&surface, &qh, output.clone());
-			let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
-
-			// Configure the toplevel to be fullscreen on the specific output
-			xdg_toplevel.set_fullscreen(Some(output));
-			xdg_toplevel.set_title("wayshot-overlay".to_string());
-			xdg_toplevel.set_app_id("wayshot".to_string());
-
-			debug!("Committing surface creation changes.");
-			surface.commit();
-
-			debug!("Waiting for layer surface to be configured.");
-			while !state.configured_surfaces.contains(&xdg_surface) {
-				event_queue.blocking_dispatch(&mut state)?;
-			}
-
-			surface.set_buffer_transform(*transform);
-			// surface.set_buffer_scale(output_info.scale());
-			surface.attach(Some(buffer), 0, 0);
-
-			let viewport = viewporter.get_viewport(&surface, &qh, ());
-			viewport.set_destination(physical_size.width as i32, physical_size.height as i32);
-
-			debug!("Committing surface with attached buffer.");
-			surface.commit();
-			xdg_surfaces.push((surface, xdg_surface, xdg_toplevel));
-			event_queue.blocking_dispatch(&mut state)?;
-		}
-
-		let region_re = callback.screenshot(self);
-
-		debug!("Unmapping and destroying layer shell surfaces.");
-		for (surface, xdg_surface, xdg_toplevel) in xdg_surfaces.iter() {
-			surface.attach(None, 0, 0);
-			surface.commit(); // unmap surface by committing a null buffer
-			xdg_toplevel.destroy();
-			xdg_surface.destroy();
-		}
-		event_queue.roundtrip(&mut state)?;
-		let region = region_re?;
-
-		let shotdata = data_list
-			.iter()
-			.find(|data| data.in_this_screen(region))
-			.ok_or(crate::WayshotError::CaptureFailed("not in region".to_owned()))?;
-		let area = shotdata.clip_area(region).expect("should have");
-		// Use mmap from CaptureOutputData
-		let shotdata_ref = &shotdata.data;
-		let frame_mmap = shotdata_ref.mmap.as_ref().unwrap();
-		let converter = crate::convert::create_converter(shotdata_ref.frame_info.format).unwrap();
-		let mut mmap_vec = frame_mmap.to_vec();
-		let color_type = converter.convert_inplace(&mut mmap_vec);
-
-		// Create a DynamicImage from the full buffer
-		let width = shotdata_ref.logical_region.inner.size.width;
-		let height = shotdata_ref.logical_region.inner.size.height;
-		let full_img = match color_type {
-			image::ColorType::Rgb8 => {
-				let buffer = ImageBuffer::from_vec(width, height, mmap_vec)
-					.ok_or(crate::WayshotError::BufferTooSmall)?;
-				DynamicImage::ImageRgb8(buffer)
-			}
-			image::ColorType::Rgba8 => {
-				let buffer = ImageBuffer::from_vec(width, height, mmap_vec)
-					.ok_or(crate::WayshotError::BufferTooSmall)?;
-				DynamicImage::ImageRgba8(buffer)
-			}
-			_ => return Err(crate::WayshotError::InvalidColor),
-		};
-
-		// Crop the image to the selected region
-		let x = area.position.x.max(0) as u32;
-		let y = area.position.y.max(0) as u32;
-		let crop_width = area.size.width;
-		let crop_height = area.size.height;
-		let cropped = full_img.crop_imm(x, y, crop_width, crop_height);
-		Ok(cropped)
-	}
-
-	/// Capture a single output
-	pub fn ext_capture_toplevel2(
-		&mut self,
-		option: CaptureOption,
-		toplevel: TopLevel,
-	) -> Result<ImageViewInfo, WayshotError> {
-		let mem_fd = create_shm_fd().unwrap();
-		let mem_file = File::from(mem_fd);
-		let mut capture = self.ext_capture_toplevel_inner(toplevel, option, mem_file.as_fd(), Some(&mem_file))?;
-
-		let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
-		let converter = crate::convert::create_converter(capture.frame_info.format).unwrap();
-		let color_type = converter.convert_inplace(&mut frame_mmap);
-		capture.mmap = Some(frame_mmap);
-
-        // Use the full window as the region
-        let region = Region {
-            position: Position { x: 0, y: 0 },
-            size: capture.frame_info.size,
-        };
-
-		Ok(ImageViewInfo {
-			data: capture.mmap.as_ref().unwrap().to_vec(),
-			width: capture.frame_info.size.width,
-			height: capture.frame_info.size.height,
-			color_type,
-			region,
-		})
-	}
-
+	
 	/// Capture a single output
 	pub fn ext_capture_toplevel2_DynamicImage(
 		&mut self,
