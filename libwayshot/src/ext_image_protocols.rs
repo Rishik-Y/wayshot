@@ -239,7 +239,7 @@ impl crate::WayshotConnection {
         &mut self,
         option: CaptureOption,
         callback: F,
-    ) -> std::result::Result<ImageViewInfo, crate::WayshotError>
+    ) -> std::result::Result<(Vec<u8>, u32, u32, ColorType, Region), crate::WayshotError>
     where
         F: AreaSelectCallback,
     {
@@ -338,14 +338,14 @@ impl crate::WayshotConnection {
         let converter = crate::convert::create_converter(shotdata_ref.frame_info.format).unwrap();
         let mut mmap_vec = frame_mmap.to_vec();
         let color_type = converter.convert_inplace(&mut mmap_vec);
-        // No need to mutate shotdata_ref.color_type, just use color_type
-        Ok(ImageViewInfo {
-            data: mmap_vec,
-            width: shotdata_ref.logical_region.inner.size.width,
-            height: shotdata_ref.logical_region.inner.size.height,
+        // Return tuple instead of ImageViewInfo
+        Ok((
+            mmap_vec,
+            shotdata_ref.logical_region.inner.size.width,
+            shotdata_ref.logical_region.inner.size.height,
             color_type,
-            region: area,
-        })
+            area,
+        ))
     }
 	
 	/// Capture a single output

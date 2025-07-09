@@ -137,17 +137,7 @@ pub fn ext_capture_area(
 	use_stdout: bool,
 	pointer: bool,
 ) -> Result<DynamicImage, WayshotImageWriteError> {
-	let ImageViewInfo {
-		data,
-		width: img_width,
-		height: img_height,
-		region:
-		Region {
-			position: Position { x, y },
-			size: Size { width, height },
-		},
-		color_type: _, // No need to match on color_type here
-	} = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
+	let (data, img_width, img_height, _color_type, region) = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
 		let info = libwaysip::get_area(
 			Some(libwaysip::WaysipConnection {
 				connection: &w_conn.conn,
@@ -165,7 +155,8 @@ pub fn ext_capture_area(
 			.map(|logical_region| logical_region.inner)
 	})?;
 
-	// Always use RGBA8, as ext_capture_area2_DynamicImage already does the conversion
+	let Region { position: Position { x, y }, size: Size { width, height } } = region;
+	// Always use RGBA8, as ext_capture_area2 already does the conversion
 	let buffer = image::ImageBuffer::from_vec(img_width, img_height, data)
 		.ok_or(ImageError::Parameter(
 			image::error::ParameterError::from_kind(
@@ -182,17 +173,7 @@ use image::codecs::png::PngEncoder;
 pub fn ext_capture_color(
     state: &mut WayshotConnection,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
-    let ImageViewInfo {
-        data,
-        width: img_width,
-        height: img_height,
-        region:
-            Region {
-                position: Position { x, y },
-                size: Size { width, height },
-            },
-        color_type,
-    } = state.ext_capture_area2(CaptureOption::None, |w_conn: &WayshotConnection| {
+    let (data, img_width, img_height, color_type, region) = state.ext_capture_area2(CaptureOption::None, |w_conn: &WayshotConnection| {
         let info = libwaysip::get_area(
             Some(libwaysip::WaysipConnection {
                 connection: &w_conn.conn,
@@ -210,6 +191,7 @@ pub fn ext_capture_color(
             .map(|logical_region| logical_region.inner)
     })?;
 
+    let Region { position: Position { x, y }, size: Size { width, height } } = region;
     let mut buff = std::io::Cursor::new(Vec::new());
     PngEncoder::new(&mut buff).write_image(&data, img_width, img_height, color_type.into())?;
     let img = image::load_from_memory_with_format(buff.get_ref(), image::ImageFormat::Png).unwrap();
