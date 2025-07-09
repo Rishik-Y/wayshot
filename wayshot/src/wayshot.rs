@@ -150,14 +150,14 @@ fn main() -> Result<()> {
                         }
                     }
                 } else if cli.geometry {
-                    ext_capture_area_DynamicImage(&mut state, stdout_print, cursor)
+                    ext_capture_area(&mut state, stdout_print, cursor)
                 } else if cli.toplevel {
-                    ext_capture_toplevel_DynamicImage(&mut state, stdout_print, cursor)
+                    ext_capture_toplevel(&mut state, stdout_print, cursor)
                 } else if output.as_ref().is_some() || cli.choose_output {
-                    ext_capture_output_DynamicImage(&mut state, output.clone(), stdout_print, cursor).map_err(|e| e.into())
+                    ext_capture_output(&mut state, output.clone(), stdout_print, cursor).map_err(|e| e.into())
                 } else {
                     // If no flag is provided, default to output selection (choose_output = true)
-                    ext_capture_output_DynamicImage(&mut state, None, stdout_print, cursor).map_err(|e| e.into())
+                    ext_capture_output(&mut state, None, stdout_print, cursor).map_err(|e| e.into())
                 };
 
                 match image_result {

@@ -69,7 +69,21 @@ pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>)
     }
 }
 
-pub fn ext_capture_toplevel_DynamicImage(
+trait ToCaptureOption {
+	fn to_capture_option(self) -> CaptureOption;
+}
+
+impl ToCaptureOption for bool {
+	fn to_capture_option(self) -> CaptureOption {
+		if self {
+			CaptureOption::PaintCursors
+		} else {
+			CaptureOption::None
+		}
+	}
+}
+
+pub fn ext_capture_toplevel(
 	state: &mut WayshotConnection,
 	use_stdout: bool,
 	pointer: bool,
@@ -90,7 +104,7 @@ pub fn ext_capture_toplevel_DynamicImage(
 	Ok(img)
 }
 
-pub fn ext_capture_output_DynamicImage(
+pub fn ext_capture_output(
 	state: &mut WayshotConnection,
 	output: Option<String>,
 	use_stdout: bool,
@@ -118,92 +132,7 @@ pub fn ext_capture_output_DynamicImage(
 	Ok(img)
 }
 
-trait ToCaptureOption {
-    fn to_capture_option(self) -> CaptureOption;
-}
-
-impl ToCaptureOption for bool {
-    fn to_capture_option(self) -> CaptureOption {
-        if self {
-            CaptureOption::PaintCursors
-        } else {
-            CaptureOption::None
-        }
-    }
-}
-
-fn write_to_image(
-    image_info: ImageViewInfo,
-    use_stdout: bool,
-) -> Result<WayshotResult, WayshotImageWriteError> {
-    let color_type = image_info.color_type;
-    if use_stdout {
-        write_to_stdout(image_info, color_type)
-    } else {
-        write_to_file(image_info, color_type)
-    }
-}
-
-use image::codecs::png::PngEncoder;
-use std::io::{BufWriter, stdout};
-
-fn write_to_stdout(
-    ImageViewInfo {
-        data,
-        width,
-        height,
-        ..
-    }: ImageViewInfo,
-    color_type: image::ColorType,
-) -> Result<WayshotResult, WayshotImageWriteError> {
-    let stdout = stdout();
-    let mut writer = BufWriter::new(stdout.lock());
-    PngEncoder::new(&mut writer).write_image(&data, width, height, color_type.into())?;
-    Ok(WayshotResult::StdoutSucceeded)
-}
-
-fn write_to_file(
-    ImageViewInfo {
-        data,
-        width,
-        height,
-        ..
-    }: ImageViewInfo,
-    color_type: image::ColorType,
-) -> Result<WayshotResult, WayshotImageWriteError> {
-    let file = random_file_path();
-    let mut writer =
-        std::fs::File::create(&file).map_err(WayshotImageWriteError::FileCreatedFailed)?;
-
-    PngEncoder::new(&mut writer).write_image(&data, width, height, color_type.into())?;
-    Ok(WayshotResult::SaveToFile(file))
-}
-
-fn random_file_path() -> PathBuf {
-    let file_name = format!(
-        "{}-haruhui.png",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    );
-    SAVEPATH.join(file_name)
-}
-
-use std::sync::LazyLock;
-
-pub static SAVEPATH: LazyLock<PathBuf> = LazyLock::new(|| {
-    let Ok(home) = env::var("HOME") else {
-        return PathBuf::from(TMP);
-    };
-    let targetpath = PathBuf::from(home).join("Pictures").join("haruhishot");
-    if !targetpath.exists() && fs::create_dir_all(&targetpath).is_err() {
-        return PathBuf::from(TMP);
-    }
-    targetpath
-});
-
-pub fn ext_capture_area_DynamicImage(
+pub fn ext_capture_area(
 	state: &mut WayshotConnection,
 	use_stdout: bool,
 	pointer: bool,
@@ -247,6 +176,8 @@ pub fn ext_capture_area_DynamicImage(
 	let cropped = full_img.crop_imm(x as u32, y as u32, width as u32, height as u32);
 	Ok(cropped)
 }
+
+use image::codecs::png::PngEncoder;
 
 pub fn ext_capture_color(
     state: &mut WayshotConnection,
