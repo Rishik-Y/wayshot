@@ -122,14 +122,22 @@ fn main() -> Result<()> {
             if has_ext_image && testing {
                 tracing::info!("Using ext_image protocol");
 
-                if cli.list_outputs {
-                    let outputs = state.vector_of_Outputs();
-                    let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
-                    for output_name in names {
-                        println!("{}", output_name);
-                    }
-                    return Ok(());
-                }
+				let stdout = io::stdout();
+				let mut writer = BufWriter::new(stdout.lock());
+
+				if cli.list_outputs {
+					let valid_outputs = state.get_all_outputs();
+					for output in valid_outputs {
+						writeln!(writer, "{}", output.name)?;
+					}
+					writer.flush()?;
+					return Ok(());
+				}
+
+				if cli.list_outputs_info {
+					state.print_displays_info();
+					return Ok(());
+				}
 
                 let outputs = state.vector_of_Outputs();
                 let output_info = if let Some(ref output_name) = output {
@@ -138,9 +146,8 @@ fn main() -> Result<()> {
                     outputs.into_iter().next()
                 };
                 if let Some(_output_info) = output_info {
-                    let image_result = ext_capture_output_DynamicImage(
+                    let image_result = ext_capture_area_DynamicImage(
                         &mut state,
-                        output.clone(),
                         stdout_print,
                         cursor,
                     );
@@ -152,15 +159,14 @@ fn main() -> Result<()> {
                                     tracing::error!("Failed to save file '{}': {}", f.display(), e);
                                 }
                             }
+							
                             if stdout_print {
                                 let mut buffer = Cursor::new(Vec::new());
                                 image_buffer.write_to(&mut buffer, encoding.into())?;
-                                let stdout = io::stdout();
-                                let mut writer = BufWriter::new(stdout.lock());
                                 writer.write_all(buffer.get_ref())?;
-                                writer.flush()?;
                                 image_buf = Some(buffer);
                             }
+							
                             if clipboard {
                                 clipboard_daemonize(match image_buf {
                                     Some(buf) => buf,
