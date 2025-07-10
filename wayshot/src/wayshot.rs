@@ -114,6 +114,8 @@ fn main() -> Result<()> {
 
     let testing = true; // Change to false to force wlr_screencopy
 
+	let frame = 5;
+
     match connection_result {
         Ok(mut state) => {
             // If we have a connection, check if it has ext_image capability
@@ -157,6 +159,39 @@ fn main() -> Result<()> {
                     ext_capture_area(&mut state, stdout_print, cursor)
                 } else if cli.toplevel {
                     ext_capture_toplevel(&mut state, stdout_print, cursor).map(|(img, name)| (img, WayshotResult::ToplevelCaptured { name }))
+                } else if cli.streaming {
+                    // Streaming: capture all frames and save each one in parallel
+                    let frames = state
+                        .ext_capture_streaming(output.clone(), stdout_print, cursor, frame)
+                        .map_err(|e| ext_wayshot::WayshotImageWriteError::WaylandError(e));
+                    match frames {
+                        Ok(frames) => {
+                            if let Some(f) = file.as_ref() {
+                                let stem = f.file_stem().unwrap_or_default().to_string_lossy();
+                                let ext = f.extension().unwrap_or_default().to_string_lossy();
+                                let mut handles = Vec::with_capacity(frames.len());
+                                for (idx, (image_buffer, _name)) in frames.into_iter().enumerate() {
+                                    let mut path = f.clone();
+                                    let new_name = format!("{}_frame{}.{}", stem, idx, ext);
+                                    path.set_file_name(new_name);
+                                    // Move image_buffer and path into the thread
+                                    handles.push(std::thread::spawn(move || {
+                                        if let Err(e) = image_buffer.save(&path) {
+                                            eprintln!("Failed to save file '{}': {}", path.display(), e);
+                                        }
+                                    }));
+                                }
+                                // Wait for all threads to finish
+                                for handle in handles {
+                                    let _ = handle.join();
+                                }
+                            }
+                            // No need to return a frame for further processing in this test branch
+                            // Return an error to skip further processing
+                            return Ok(());
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
                 } else if output.as_ref().is_some() || cli.choose_output {
                     ext_capture_output(&mut state, output.clone(), stdout_print, cursor)
                         .map(|(img, name)| (img, WayshotResult::OutputCaptured { name }))
@@ -179,13 +214,20 @@ fn main() -> Result<()> {
                                 // Only show notification for OutputCaptured, ToplevelCaptured, or AreaCaptured
                                 match &result_variant {
                                     WayshotResult::ToplevelCaptured { name } => notify_result(Ok(WayshotResult::ToplevelCaptured { name: name.clone() })),
-                                    WayshotResult::OutputCaptured { name } => notify_result(Ok(WayshotResult::OutputCaptured { name: name.clone() })),
+                                    WayshotResult::OutputCaptured { name } => {
+                                        if !cli.streaming {
+                                            notify_result(Ok(WayshotResult::OutputCaptured { name: name.clone() }))
+                                        }
+                                    },
                                     WayshotResult::AreaCaptured => notify_result(Ok(WayshotResult::AreaCaptured)),
                                     _ => {},
                                 }
                             }
                         } else {
-                            notify_result(Ok(result_variant));
+                            // Only notify if not streaming
+                            if !cli.streaming {
+                                notify_result(Ok(result_variant));
+                            }
                         }
 
                         if stdout_print {
