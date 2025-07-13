@@ -134,7 +134,6 @@ impl From<CaptureOption> for Options {
 
 pub(crate) struct AreaShotInfo {
     pub(crate) data: CaptureOutputData,
-    pub(crate) mem_file: File,
 }
 
 impl AreaShotInfo {
@@ -248,7 +247,7 @@ impl crate::WayshotConnection {
             // Set mmap in CaptureOutputData
             let frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
             data.mmap = Some(frame_mmap);
-            data_list.push(AreaShotInfo { data, mem_file })
+            data_list.push(AreaShotInfo { data })
         }
 
         let mut state = XdgShellState::new();
@@ -333,7 +332,7 @@ impl crate::WayshotConnection {
             area,
         ))
     }
-	
+
 	/// Capture a single output
 	pub fn ext_capture_toplevel2(
 		&mut self,

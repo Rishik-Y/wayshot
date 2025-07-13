@@ -537,18 +537,16 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, Arc<RwLock<FrameFormat>>> for Waysho
             ext_image_copy_capture_session_v1::Event::BufferSize { width, height } => {
                 frame_info.size = Size { width, height };
             }
-            ext_image_copy_capture_session_v1::Event::ShmFormat { format } => {
-                match format {
-                    WEnum::Value(fmt) => {
-                        println!("Compositor supports shm format: {fmt:?}");
-                        //TODO! ASK Aakash About the Compsotor Format selection
-                        //if frame_info.format == wayland_client::protocol::wl_shm::Format::Xbgr8888 {
-                        //    frame_info.format = wayland_client::protocol::wl_shm::Format::Xbgr8888;
-                            frame_info.format = fmt;
-                        //}
-                    }
-                    _ => {}
-                }
+            ext_image_copy_capture_session_v1::Event::ShmFormat { format: WEnum::Value(fmt) } => {
+                println!("Compositor supports shm format: {fmt:?}");
+                //TODO! ASK Aakash About the Compsotor Format selection
+                //if frame_info.format == wayland_client::protocol::wl_shm::Format::Xbgr8888 {
+                //frame_info.format = wayland_client::protocol::wl_shm::Format::Xbgr8888;
+                frame_info.format = fmt;
+                //}
+            }
+            ext_image_copy_capture_session_v1::Event::ShmFormat { format: _ } => {
+                // Ignore non-Value variants
             }
             ext_image_copy_capture_session_v1::Event::Done => {}
             _ => {}
