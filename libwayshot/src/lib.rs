@@ -18,7 +18,6 @@ use khronos_egl::{self as egl, Instance};
 use memmap2::MmapMut;
 use region::{EmbeddedRegion, RegionCapturer};
 use screencopy::{DMAFrameFormat, DMAFrameGuard, EGLImageGuard, FrameData, FrameGuard};
-use std::ops::Deref;
 use std::{
     ffi::c_void,
     fs::File,
@@ -66,19 +65,12 @@ pub mod reexport {
     use wayland_client::protocol::wl_output;
     pub use wl_output::{Transform, WlOutput};
 }
-use crate::ext_image_protocols::{AreaSelectCallback, CaptureInfo, CaptureOption, TopLevel};
+use crate::ext_image_protocols::TopLevel;
 use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
-use wayland_backend::protocol::WEnum;
-use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
 use wayland_protocols::ext::image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1;
-use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason;
 use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
-use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
-use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
-use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
 use wayland_protocols::ext::image_capture_source::v1::client::ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1;
-use crate::region::Region;
 
 /// Struct to store wayland connection and globals list.
 /// # Example usage
@@ -290,7 +282,7 @@ impl WayshotConnection {
                 tracing::error!(
                     "Failed to create ZxdgOutputManagerV1 version 3. Does your compositor implement ZxdgOutputManagerV1?"
                 );
-                panic!("{:#?}", e);
+                panic!("{e:#?}");
             }
         };
 
@@ -914,7 +906,7 @@ impl WayshotConnection {
     }
 
     /// Get a FrameCopy instance with screenshot pixel data for any wl_output object.
-    #[tracing::instrument(skip_all, fields(output = format!("{output_info}"), region = capture_region.map(|r| format!("{:}", r)).unwrap_or("fullscreen".to_string())))]
+    #[tracing::instrument(skip_all, fields(output = format!("{output_info}"), region = capture_region.map(|r| format!("{r:}")).unwrap_or("fullscreen".to_string())))]
     fn capture_frame_copy(
         &self,
         cursor_overlay: bool,

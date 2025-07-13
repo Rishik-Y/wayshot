@@ -1,5 +1,4 @@
 use image::{DynamicImage, GenericImageView, ImageEncoder, ImageError};
-use std::path::PathBuf;
 
 use crate::utils::waysip_to_region;
 use dialoguer::FuzzySelect;
@@ -180,7 +179,7 @@ pub fn ext_capture_area(
             ),
         ))?;
     let full_img = DynamicImage::ImageRgba8(buffer);
-    let cropped = full_img.crop_imm(x as u32, y as u32, width as u32, height as u32);
+    let cropped = full_img.crop_imm(x as u32, y as u32, width, height);
     Ok((cropped, WayshotResult::AreaCaptured))
 }
 
@@ -211,7 +210,7 @@ pub fn ext_capture_color(
     PngEncoder::new(&mut buff).write_image(&data, img_width, img_height, color_type.into())?;
     let img = image::load_from_memory_with_format(buff.get_ref(), image::ImageFormat::Png).unwrap();
 
-    let clipimage = img.view(x as u32, y as u32, width as u32, height as u32);
+    let clipimage = img.view(x as u32, y as u32, width, height);
     let pixel = clipimage.get_pixel(0, 0);
     println!(
         "RGB: R:{}, G:{}, B:{}, A:{}",

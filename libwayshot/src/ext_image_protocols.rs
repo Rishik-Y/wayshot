@@ -191,7 +191,6 @@ impl AreaShotInfo {
     }
 }
 
-use std::ops::Deref;
 
 // Implementation of WayshotConnection methods related to ext_image_protocols
 impl crate::WayshotConnection {
@@ -435,10 +434,10 @@ impl crate::WayshotConnection {
                 | Format::Xbgr8888
 				| Format::Bgr888
         ) {
-			println!("Unsupported format: {:?}", frame_format);
+			println!("Unsupported format: {frame_format:?}");
 			return Err(crate::WayshotError::NotSupportFormat);
 		} else {
-			println!("Matched format: {:?}", frame_format);
+			println!("Matched format: {frame_format:?}");
 		}
 
 		let frame_bytes = 4 * height * width;
@@ -507,20 +506,20 @@ impl crate::WayshotConnection {
 		Ok(CaptureOutputData {
 			output,
 			buffer,
-			logical_region: logical_region.clone(),
+			logical_region,
 			frame_info: FrameFormat {
 				format: frame_format,
 				size: Size {
-					width: logical_region.inner.size.width as u32,
-					height: logical_region.inner.size.height as u32,
+					width: logical_region.inner.size.width,
+					height: logical_region.inner.size.height,
 				},
 				stride,
 			},
 			transform,
 			color_type: ColorType::Rgba8, // placeholder, will be set after conversion
 			physical_size: Size {
-				width: logical_region.inner.size.width as u32,
-				height: logical_region.inner.size.height as u32,
+				width: logical_region.inner.size.width,
+				height: logical_region.inner.size.height,
 			},
 			mmap: None, // Initialize mmap as None
 		})

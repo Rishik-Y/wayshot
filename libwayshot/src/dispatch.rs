@@ -72,7 +72,7 @@ impl Dispatch<WlRegistry, ()> for OutputCaptureState {
                 if version >= 4 {
                     let output = wl_registry.bind::<wl_output::WlOutput, _, _>(name, 4, qh, ());
                     state.outputs.push(OutputInfo {
-                        output: output,
+                        output,
                         name: "".to_string(),
                         description: String::new(),
                         transform: wl_output::Transform::Normal,
@@ -363,14 +363,11 @@ impl Dispatch<XdgSurface, WlOutput> for XdgShellState {
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        match event {
-            xdg_surface::Event::Configure { serial } => {
-                tracing::debug!("Acking XDG surface configure");
-                state.configured_surfaces.insert(proxy.clone());
-                proxy.ack_configure(serial);
-                tracing::trace!("Acked XDG surface configure");
-            }
-            _ => {}
+        if let xdg_surface::Event::Configure { serial } = event {
+            tracing::debug!("Acking XDG surface configure");
+            state.configured_surfaces.insert(proxy.clone());
+            proxy.ack_configure(serial);
+            tracing::trace!("Acked XDG surface configure");
         }
     }
 }
@@ -385,11 +382,8 @@ impl Dispatch<XdgWmBase, ()> for XdgShellState {
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        match event {
-            xdg_wm_base::Event::Ping { serial } => {
-                proxy.pong(serial);
-            }
-            _ => {}
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            proxy.pong(serial);
         }
     }
 }
@@ -545,7 +539,7 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, Arc<RwLock<FrameFormat>>> for Waysho
             }
             ext_image_copy_capture_session_v1::Event::ShmFormat { format } => {
                 if let WEnum::Value(fmt) = format {
-                    println!("Compositor supports shm format: {:?}", fmt);
+                    println!("Compositor supports shm format: {fmt:?}");
 					//if frame_info.format == wayland_client::protocol::wl_shm::Format::Xbgr8888 {
 						frame_info.format = wayland_client::protocol::wl_shm::Format::Xbgr8888;
 						//frame_info.format = fmt;

@@ -160,19 +160,17 @@ fn main() -> Result<()> {
                 } else if output.as_ref().is_some() || cli.choose_output {
                     ext_capture_output(&mut state, output.clone(), stdout_print, cursor)
                         .map(|(img, name)| (img, WayshotResult::OutputCaptured { name }))
-                        .map_err(|e| e.into())
                 } else {
                     // If no flag is provided, default to output selection (choose_output = true)
                     ext_capture_output(&mut state, None, stdout_print, cursor)
                         .map(|(img, name)| (img, WayshotResult::OutputCaptured { name }))
-                        .map_err(|e| e.into())
                 };
 
                 match image_result {
                     Ok((image_buffer, result_variant)) => {
                         let mut image_buf: Option<Cursor<Vec<u8>>> = None;
                         if let Some(f) = file.as_ref() {
-                            if let Err(e) = image_buffer.save(&f) {
+                            if let Err(e) = image_buffer.save(f) {
                                 tracing::error!("Failed to save file '{}': {}", f.display(), e);
                                 notify_result(Err(ext_wayshot::WayshotImageWriteError::ImageError(e)));
                             } else {
