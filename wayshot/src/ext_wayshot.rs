@@ -81,18 +81,20 @@ pub fn notify_result(shot_result: Result<WayshotResult, WayshotImageWriteError>)
 }
 
 trait ToCaptureOption {
-	fn to_capture_option(self) -> CaptureOption;
+    fn to_capture_option(self) -> CaptureOption;
 }
 
 impl ToCaptureOption for bool {
-	fn to_capture_option(self) -> CaptureOption {
-		if self {
-			CaptureOption::PaintCursors
-		} else {
-			CaptureOption::None
-		}
-	}
+    fn to_capture_option(self) -> CaptureOption {
+        if self {
+            CaptureOption::PaintCursors
+        } else {
+            CaptureOption::None
+        }
+    }
 }
+
+//TODO! CHECK ON THE USE_STDOUT PART WHETHER ITS NEEDED OR NOT (On ALL THREE BELOW FUNCTIONS)
 
 pub fn ext_capture_toplevel(
     state: &mut WayshotConnection,
@@ -149,33 +151,36 @@ pub fn ext_capture_area(
     _use_stdout: bool,
     pointer: bool,
 ) -> Result<(DynamicImage, WayshotResult), WayshotImageWriteError> {
-    let (data, img_width, img_height, _color_type, region) = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
-        let info = libwaysip::get_area(
-            Some(libwaysip::WaysipConnection {
-                connection: &w_conn.conn,
-                globals: &w_conn.globals,
-            }),
-            libwaysip::SelectionType::Area,
-        )
+    let (data, img_width, img_height, _color_type, region) =
+        state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
+            let info = libwaysip::get_area(
+                Some(libwaysip::WaysipConnection {
+                    connection: &w_conn.conn,
+                    globals: &w_conn.globals,
+                }),
+                libwaysip::SelectionType::Area,
+            )
             .map_err(|e| libwayshot::error::WayshotError::CaptureFailed(e.to_string()))?
             .ok_or(libwayshot::error::WayshotError::CaptureFailed(
                 "Failed to capture the area".to_string(),
             ))?;
 
-        // Map the Result<LogicalRegion> directly to Result<Region>
-        waysip_to_region(info.size(), info.left_top_point())
-            .map(|logical_region| logical_region.inner)
-    })?;
+            // Map the Result<LogicalRegion> directly to Result<Region>
+            waysip_to_region(info.size(), info.left_top_point())
+                .map(|logical_region| logical_region.inner)
+        })?;
 
-    let Region { position: Position { x, y }, size: Size { width, height } } = region;
-	//TODO!!! (NEED TO ADD COLOR TYPER IN FOR APPLICATION)
+    let Region {
+        position: Position { x, y },
+        size: Size { width, height },
+    } = region;
+    //TODO!!! (NEED TO ADD COLOR TYPER IN FOR APPLICATION)
     // Always use RGBA8, FOR NOW!! ext_capture_area2 already does the conversion
-    let buffer = image::ImageBuffer::from_vec(img_width, img_height, data)
-        .ok_or(ImageError::Parameter(
-            image::error::ParameterError::from_kind(
-                image::error::ParameterErrorKind::DimensionMismatch,
-            ),
-        ))?;
+    let buffer = image::ImageBuffer::from_vec(img_width, img_height, data).ok_or(
+        ImageError::Parameter(image::error::ParameterError::from_kind(
+            image::error::ParameterErrorKind::DimensionMismatch,
+        )),
+    )?;
     let full_img = DynamicImage::ImageRgba8(buffer);
     let cropped = full_img.crop_imm(x as u32, y as u32, width, height);
     Ok((cropped, WayshotResult::AreaCaptured))
@@ -186,24 +191,28 @@ use image::codecs::png::PngEncoder;
 pub fn ext_capture_color(
     state: &mut WayshotConnection,
 ) -> Result<WayshotResult, WayshotImageWriteError> {
-    let (data, img_width, img_height, color_type, region) = state.ext_capture_area2(CaptureOption::None, |w_conn: &WayshotConnection| {
-        let info = libwaysip::get_area(
-            Some(libwaysip::WaysipConnection {
-                connection: &w_conn.conn,
-                globals: &w_conn.globals,
-            }),
-            libwaysip::SelectionType::Point,
-        )
-        .map_err(|e| libwayshot::error::WayshotError::CaptureFailed(e.to_string()))?
-        .ok_or(libwayshot::error::WayshotError::CaptureFailed(
-            "Failed to capture the area".to_string(),
-        ))?;
+    let (data, img_width, img_height, color_type, region) =
+        state.ext_capture_area2(CaptureOption::None, |w_conn: &WayshotConnection| {
+            let info = libwaysip::get_area(
+                Some(libwaysip::WaysipConnection {
+                    connection: &w_conn.conn,
+                    globals: &w_conn.globals,
+                }),
+                libwaysip::SelectionType::Point,
+            )
+            .map_err(|e| libwayshot::error::WayshotError::CaptureFailed(e.to_string()))?
+            .ok_or(libwayshot::error::WayshotError::CaptureFailed(
+                "Failed to capture the area".to_string(),
+            ))?;
 
-        waysip_to_region(info.size(), info.left_top_point())
-            .map(|logical_region| logical_region.inner)
-    })?;
+            waysip_to_region(info.size(), info.left_top_point())
+                .map(|logical_region| logical_region.inner)
+        })?;
 
-    let Region { position: Position { x, y }, size: Size { width, height } } = region;
+    let Region {
+        position: Position { x, y },
+        size: Size { width, height },
+    } = region;
     let mut buff = std::io::Cursor::new(Vec::new());
     PngEncoder::new(&mut buff).write_image(&data, img_width, img_height, color_type.into())?;
     let img = image::load_from_memory_with_format(buff.get_ref(), image::ImageFormat::Png).unwrap();

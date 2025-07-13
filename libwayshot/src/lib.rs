@@ -89,7 +89,7 @@ pub struct ExtBase<T> {
     pub shm: Option<WlShm>,
     pub qh: Option<QueueHandle<T>>,
     pub event_queue: Option<EventQueue<T>>,
-	pub toplevel_image_manager: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
+    pub toplevel_image_manager: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
 }
 
 #[derive(Debug)]
@@ -150,8 +150,8 @@ impl WayshotConnection {
                     shm: None,
                     qh: None,
                     event_queue: None,
-					toplevel_image_manager: None,
-				})
+                    toplevel_image_manager: None,
+                })
             } else {
                 None
             },
@@ -178,7 +178,11 @@ impl WayshotConnection {
                             // Add binding for toplevel_image_manager here
                             let toplevel_image_manager = initial_state
                                 .globals
-                                .bind::<ExtForeignToplevelImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())
+                                .bind::<ExtForeignToplevelImageCaptureSourceManagerV1, _, _>(
+                                    &qh,
+                                    1..=1,
+                                    (),
+                                )
                                 .ok();
 
                             match initial_state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ()) {
@@ -683,7 +687,7 @@ impl WayshotConnection {
                 matches!(
                     frame.format,
                     wl_shm::Format::Xbgr2101010
-						| wl_shm::Format::Xrgb2101010
+                        | wl_shm::Format::Xrgb2101010
                         | wl_shm::Format::Abgr2101010
                         | wl_shm::Format::Argb8888
                         | wl_shm::Format::Xrgb8888
@@ -1030,7 +1034,7 @@ impl WayshotConnection {
 
         let mut xdg_surfaces = Vec::with_capacity(frames.len());
 
-		//TODO: Please dont forget to recheck the frame copy part requirement!
+        //TODO: Please dont forget to recheck the frame copy part requirement!
         for (_frame_copy, frame_guard, output_info) in frames {
             tracing::span!(
                 tracing::Level::DEBUG,
