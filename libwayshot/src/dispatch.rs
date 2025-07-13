@@ -414,7 +414,7 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
 use wayland_client::event_created_child;
 
 use crate::WayshotConnection;
-use crate::ext_image_protocols::{CaptureInfo, TopLevel}; // Add this import
+use crate::ext_image_protocols::{CaptureInfo, TopLevel};
 
 delegate_noop!(WayshotConnection: ignore ExtImageCaptureSourceV1);
 delegate_noop!(WayshotConnection: ignore ExtOutputImageCaptureSourceManagerV1);

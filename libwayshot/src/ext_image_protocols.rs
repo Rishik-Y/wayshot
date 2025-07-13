@@ -42,11 +42,11 @@ pub(crate) struct CaptureOutputData {
     pub(crate) buffer: WlBuffer,
 
     pub(crate) frame_info: FrameFormat,
-	pub(crate) color_type: ColorType, // added here
-	pub(crate) mmap: Option<memmap2::MmapMut>, // NEW: store mmap for image data
+	pub(crate) color_type: ColorType,
+	pub(crate) mmap: Option<memmap2::MmapMut>,
 	pub(crate) transform: wl_output::Transform,
-	pub(crate) logical_region: LogicalRegion, // replaces width, height, screen_position
-	pub(crate) physical_size: Size, // replaced real_width/real_height
+	pub(crate) logical_region: LogicalRegion,
+	pub(crate) physical_size: Size,
 }
 
 #[derive(Debug, Clone)]

@@ -125,7 +125,7 @@ pub fn ext_capture_output(
     pointer: bool,
 ) -> eyre::Result<(image::DynamicImage, String), WayshotImageWriteError> {
     let outputs = state.vector_of_Outputs();
-    let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
+    let names: Vec<&str> = outputs.iter().map(|info| info.name.as_str()).collect();
 
     let selection = match output {
         Some(name) => names
@@ -171,7 +171,8 @@ pub fn ext_capture_area(
     })?;
 
     let Region { position: Position { x, y }, size: Size { width, height } } = region;
-    // Always use RGBA8, as ext_capture_area2 already does the conversion
+	//TODO!!! (NEED TO ADD COLOR TYPER IN FOR APPLICATION)
+    // Always use RGBA8, FOR NOW!! ext_capture_area2 already does the conversion
     let buffer = image::ImageBuffer::from_vec(img_width, img_height, data)
         .ok_or(ImageError::Parameter(
             image::error::ParameterError::from_kind(
@@ -201,7 +202,6 @@ pub fn ext_capture_color(
             "Failed to capture the area".to_string(),
         ))?;
 
-        // Map the Result<LogicalRegion> directly to Result<Region>
         waysip_to_region(info.size(), info.left_top_point())
             .map(|logical_region| logical_region.inner)
     })?;

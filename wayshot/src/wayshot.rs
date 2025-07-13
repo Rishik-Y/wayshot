@@ -211,18 +211,6 @@ fn main() -> Result<()> {
                         notify_result(Err(e));
                     }
                 }
-
-                //let result = if cli.geometry {
-                //    ext_capture_area(&mut state, stdout_print, cursor)
-                //} else if cli.color {
-				//	ext_capture_color(&mut state)
-				//} else if cli.experimental {
-				//	ext_capture_toplevel(&mut state, stdout_print, cursor)
-				//} else {
-                //    ext_capture_output(&mut state, output, stdout_print, cursor)
-				//};
-				//
-                //notify_result(result);
                 return Ok(());
             } else {
                 tracing::info!("ext_image protocol not available, using wlr_screencopy");
@@ -292,7 +280,6 @@ fn main() -> Result<()> {
                 if let Some(f) = file {
                     if let Err(e) = image_buffer.save(&f) {
                         tracing::error!("Failed to save file '{}': {}", f.display(), e);
-                        // Optionally, notify the user or handle the error as needed
                     }
                 }
 

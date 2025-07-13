@@ -1010,7 +1010,6 @@ impl WayshotConnection {
             }
         };
 
-        // Use XDG shell instead of layer shell
         let xdg_wm_base = match self
             .globals
             .bind::<wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase, _, _>(
@@ -1037,7 +1036,6 @@ impl WayshotConnection {
             );
         }
 
-        // Use a vector to store XDG surfaces instead of layer shell surfaces
         let mut xdg_surfaces = Vec::with_capacity(frames.len());
 
         for (frame_copy, frame_guard, output_info) in frames {
@@ -1049,7 +1047,6 @@ impl WayshotConnection {
             .in_scope(|| -> Result<()> {
                 let surface = compositor.create_surface(&qh, ());
 
-                // Create XDG surface and toplevel instead of layer shell surface
                 let xdg_surface =
                     xdg_wm_base.get_xdg_surface(&surface, &qh, output_info.output.clone());
                 let xdg_toplevel = xdg_surface.get_toplevel(&qh, ());
