@@ -144,8 +144,7 @@ pub fn ext_capture_output(
     pointer: bool,
 ) -> eyre::Result<(image::DynamicImage, String), WayshotImageWriteError> {
     let outputs = state.vector_of_Outputs();
-    let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
-
+	let names: Vec<&str> = outputs.iter().map(|info| info.name.as_str()).collect();
     let selection = match output {
         Some(name) => names
             .iter()
