@@ -15,7 +15,7 @@ use libwayshot::region::{LogicalRegion, Position, Region, Size};
 
 pub fn waysip_to_region(
     size: libwaysip::Size,
-    position: libwaysip::Position,
+    point: libwaysip::Position,
 ) -> Result<LogicalRegion> {
     let size: Size = Size {
         width: size.width.try_into().map_err(|_| {
@@ -26,8 +26,8 @@ pub fn waysip_to_region(
         })?,
     };
     let position: Position = Position {
-        x: position.x,
-        y: position.y,
+        x: point.x,
+        y: point.y,
     };
 
     Ok(LogicalRegion {
