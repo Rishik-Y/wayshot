@@ -131,8 +131,8 @@ fn main() -> Result<()> {
                     }),
                     libwaysip::SelectionType::Area,
                 )
-                .map_err(|e| libwayshot::Error::FreezeCallbackError(e.to_string()))?
-                .ok_or(libwayshot::Error::FreezeCallbackError(
+                .map_err(|e| libwayshot::WayshotError::FreezeCallbackError(e.to_string()))?
+                .ok_or(libwayshot::WayshotError::FreezeCallbackError(
                     "Failed to capture the area".to_string(),
                 ))?;
                 waysip_to_region(info.size(), info.left_top_point())
