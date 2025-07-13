@@ -205,7 +205,7 @@ impl crate::WayshotConnection {
 		frame: usize,
 	) -> crate::Result<Vec<(image::DynamicImage, String)>, WayshotError> {
 		let outputs = self.vector_of_Outputs();
-		let names: Vec<&str> = outputs.iter().map(|info| info.name()).collect();
+		let names: Vec<&str> = outputs.iter().map(|info| info.name.as_str()).collect();
 
 		let selection = match output {
 			Some(name) => names
@@ -429,8 +429,8 @@ impl crate::WayshotConnection {
 			mmap: None, // Initialize mmap as None
 		})
 	}
-	
-	
+
+
 	/// Capture a single output and return a DynamicImage
 	pub fn ext_capture_single_output(
 		&mut self,

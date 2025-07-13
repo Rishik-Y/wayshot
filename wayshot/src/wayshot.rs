@@ -114,7 +114,7 @@ fn main() -> Result<()> {
 
     let testing = true; // Change to false to force wlr_screencopy
 
-	let frame = 5;
+	let frame = 100;
 
     match connection_result {
         Ok(mut state) => {
@@ -160,34 +160,34 @@ fn main() -> Result<()> {
                 } else if cli.toplevel {
                     ext_capture_toplevel(&mut state, stdout_print, cursor).map(|(img, name)| (img, WayshotResult::ToplevelCaptured { name }))
                 } else if cli.streaming {
-                    // Streaming: capture all frames and save each one in parallel
-                    let frames = state
+                    // Streaming: capture frames one-by-one, save each in parallel as soon as it's captured
+                    let frames_result = state
                         .ext_capture_streaming(output.clone(), stdout_print, cursor, frame)
                         .map_err(|e| ext_wayshot::WayshotImageWriteError::WaylandError(e));
-                    match frames {
+                    match frames_result {
                         Ok(frames) => {
                             if let Some(f) = file.as_ref() {
-                                let stem = f.file_stem().unwrap_or_default().to_string_lossy();
-                                let ext = f.extension().unwrap_or_default().to_string_lossy();
+                                let stem = f.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                                let ext = f.extension().unwrap_or_default().to_string_lossy().to_string();
                                 let mut handles = Vec::with_capacity(frames.len());
                                 for (idx, (image_buffer, _name)) in frames.into_iter().enumerate() {
                                     let mut path = f.clone();
                                     let new_name = format!("{}_frame{}.{}", stem, idx, ext);
                                     path.set_file_name(new_name);
-                                    // Move image_buffer and path into the thread
-                                    handles.push(std::thread::spawn(move || {
+                                    // Spawn a thread to save the frame while capturing continues
+                                    let handle = std::thread::spawn(move || {
                                         if let Err(e) = image_buffer.save(&path) {
                                             eprintln!("Failed to save file '{}': {}", path.display(), e);
                                         }
-                                    }));
+                                    });
+                                    handles.push(handle);
+                                    // Capturing continues immediately to next frame
                                 }
-                                // Wait for all threads to finish
+                                // Wait for all save threads to finish
                                 for handle in handles {
                                     let _ = handle.join();
                                 }
                             }
-                            // No need to return a frame for further processing in this test branch
-                            // Return an error to skip further processing
                             return Ok(());
                         }
                         Err(e) => return Err(e.into()),
