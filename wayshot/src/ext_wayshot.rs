@@ -5,8 +5,6 @@ use dialoguer::FuzzySelect;
 use dialoguer::theme::ColorfulTheme;
 use libwayshot::WayshotConnection;
 
-const TMP: &str = "/tmp";
-
 use libwayshot::ext_image_protocols::CaptureOption;
 use libwayshot::region::{Position, Region, Size};
 
@@ -98,7 +96,7 @@ impl ToCaptureOption for bool {
 
 pub fn ext_capture_toplevel(
     state: &mut WayshotConnection,
-    use_stdout: bool,
+    _use_stdout: bool,
     pointer: bool,
 ) -> Result<(DynamicImage, String), WayshotImageWriteError> {
     let toplevels = state.toplevels();
@@ -120,7 +118,7 @@ pub fn ext_capture_toplevel(
 pub fn ext_capture_output(
     state: &mut WayshotConnection,
     output: Option<String>,
-    use_stdout: bool,
+    _use_stdout: bool,
     pointer: bool,
 ) -> eyre::Result<(image::DynamicImage, String), WayshotImageWriteError> {
     let outputs = state.vector_of_outputs();
@@ -148,7 +146,7 @@ pub fn ext_capture_output(
 
 pub fn ext_capture_area(
     state: &mut WayshotConnection,
-    use_stdout: bool,
+    _use_stdout: bool,
     pointer: bool,
 ) -> Result<(DynamicImage, WayshotResult), WayshotImageWriteError> {
     let (data, img_width, img_height, _color_type, region) = state.ext_capture_area2(pointer.to_capture_option(), |w_conn: &WayshotConnection| {
