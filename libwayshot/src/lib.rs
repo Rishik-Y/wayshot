@@ -1030,7 +1030,8 @@ impl WayshotConnection {
 
         let mut xdg_surfaces = Vec::with_capacity(frames.len());
 
-        for (frame_copy, frame_guard, output_info) in frames {
+		//TODO: Please dont forget to recheck the frame copy part requirement!
+        for (_frame_copy, frame_guard, output_info) in frames {
             tracing::span!(
                 tracing::Level::DEBUG,
                 "overlay_frames::surface",
@@ -1274,7 +1275,7 @@ impl WayshotConnection {
 
 impl WayshotConnection {
     /// get all outputs and their info
-    pub fn vector_of_Outputs(&self) -> &Vec<OutputInfo> {
+    pub fn vector_of_outputs(&self) -> &Vec<OutputInfo> {
         &self.output_infos
     }
 

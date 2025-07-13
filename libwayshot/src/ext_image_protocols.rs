@@ -237,7 +237,7 @@ impl crate::WayshotConnection {
         use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
         use tracing::debug;
 
-        let outputs = self.vector_of_Outputs().clone();
+        let outputs = self.vector_of_outputs().clone();
 
         let mut data_list = vec![];
         for data in outputs.into_iter() {
