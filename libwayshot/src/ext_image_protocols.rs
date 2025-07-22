@@ -712,7 +712,45 @@ impl TryFrom<&CaptureTopLevelData> for DynamicImage {
 }
 
 impl crate::WayshotConnection {
-	/// Streaming capture: capture N frames from the selected output.
+	/// Initialize or reuse a streaming session for the given output
+	fn get_or_create_streaming_session(
+		&mut self,
+		output_info: &crate::output::OutputInfo,
+		option: CaptureOption,
+	) -> crate::Result<()> {
+		let ext_image = self.ext_image.as_mut().expect("ext_image should be initialized");
+
+		// Check if we have a cached session for this output
+		let need_new_session = match &ext_image.cached_streaming_session {
+			Some(cached) => cached.output_info != *output_info,
+			None => true,
+		};
+
+		if need_new_session {
+			let cloned_info = output_info.clone();
+			let img_manager = ext_image.output_image_manager.as_ref().expect("Should init");
+			let capture_manager = ext_image.img_copy_manager.as_ref().expect("Should init");
+			let qh = ext_image.qh.as_ref().expect("Should init");
+
+			let source = img_manager.create_source(&output_info.output, qh, ());
+			let info = Arc::new(RwLock::new(FrameFormat {
+				format: Format::Xrgb8888,
+				size: Size { width: 0, height: 0 },
+				stride: 0,
+			}));
+			let session = capture_manager.create_session(&source, option.into(), qh, info);
+
+			ext_image.cached_streaming_session = Some(crate::StreamingSession {
+				source,
+				session,
+				output_info: cloned_info,
+			});
+		}
+
+		Ok(())
+	}
+
+	/// Streaming capture: capture N frames from the selected output with optimized globals reuse
 	pub fn ext_capture_streaming(
 		&mut self,
 		output: Option<String>,
@@ -733,12 +771,14 @@ impl crate::WayshotConnection {
 
 		let output_name = names[selection].to_string();
 		let output = outputs[selection].clone();
-
 		let capture_option = if pointer { CaptureOption::PaintCursors } else { CaptureOption::None };
+
+		// Initialize the streaming session once
+		self.get_or_create_streaming_session(&output, capture_option)?;
 
 		let mut frames = Vec::with_capacity(frame);
 		for _ in 0..frame {
-			let img = self.ext_capture_single_output_streaming(
+			let img = self.ext_capture_single_output_streaming_optimized(
 				capture_option,
 				output.clone(),
 			)?;
@@ -747,202 +787,184 @@ impl crate::WayshotConnection {
 		Ok(frames)
 	}
 
-	/// Capture a single output and return a DynamicImage
-	pub fn ext_capture_single_output_streaming(
+	pub fn ext_capture_single_output_streaming_optimized(
 		&mut self,
 		option: CaptureOption,
 		output: crate::output::OutputInfo,
 	) -> std::result::Result<DynamicImage, crate::WayshotError> {
 		let mem_fd = create_shm_fd().unwrap();
 		let mem_file = File::from(mem_fd);
-		let mut capture_data = self.ext_capture_output_inner_streaming(
-			output.clone(),
-			option,
+
+		// Clone output and option to avoid move issues
+		let output_clone = output.clone();
+		let option_clone = option.clone();
+
+		let mut capture_data = self.ext_capture_output_inner_streaming_optimized(
+			output_clone.clone(),  // Use clone to pass without moving
+			option_clone,
 			mem_file.as_fd(),
 			Some(&mem_file),
 		)?;
 
 		let mut frame_mmap = unsafe { memmap2::MmapMut::map_mut(&mem_file).unwrap() };
-
 		let converter = crate::convert::create_converter(capture_data.frame_info.format).unwrap();
 		let color_type = converter.convert_inplace(&mut frame_mmap);
 
 		capture_data.color_type = color_type;
 		capture_data.mmap = Some(frame_mmap);
 
-		// Use TryFrom to convert to DynamicImage
 		(&capture_data).try_into()
 	}
 
-	fn ext_capture_output_inner_streaming<T: AsFd>(
+
+	/// Optimised inner capture that re-uses globals *and* keeps the borrow
+	/// checker happy.
+	fn ext_capture_output_inner_streaming_optimized<T: AsFd>(
 		&mut self,
 		output_info: crate::output::OutputInfo,
 		option: CaptureOption,
 		fd: T,
 		file: Option<&File>,
-	) -> std::result::Result<CaptureOutputData, crate::WayshotError> {
-		let crate::output::OutputInfo {
-			output,
-			logical_region,
-			..
-		} = output_info;
+	) -> Result<CaptureOutputData, WayshotError> {
+		use wayland_client::protocol::wl_shm::Format;
 
-		let mut event_queue = self
-			.ext_image
-			.as_mut()
-			.expect("ext_image should be initialized")
-			.event_queue
-			.take()
-			.expect("Control your self");
-		let img_manager = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.output_image_manager
-			.as_ref()
-			.expect("Should init");
-		let capture_manager = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.img_copy_manager
-			.as_ref()
-			.expect("Should init");
-		let qh = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.qh
-			.as_ref()
-			.expect("Should init");
-		let source = img_manager.create_source(&output, qh, ());
-		let info = Arc::new(RwLock::new(FrameFormat {
-			format: Format::Xrgb8888, // placeholder, will be set by protocol event
-			size: Size { width: 0, height: 0 }, // placeholder
-			stride: 0, // placeholder
+		//------------------------------ 1. ensure session ---------------------------------
+		self.get_or_create_streaming_session(&output_info, option)?;
+
+		//------------------------------ 2. pull things out of  self.ext_image --------------
+		// Everything we need is cloned / moved **out** so the borrow ends immediately.
+		let (
+			mut local_evq,              // `EventQueue`
+			session,                    // `ExtImageCopyCaptureSessionV1`
+			shm,                        // `WlShm`
+			qh                          // `QueueHandle<WayshotConnection>`
+		) = {
+			let ext = self.ext_image.as_mut().expect("ext_image not init");
+
+			let evq  = ext.event_queue.take().expect("event_queue missing");
+			let sess = ext
+				.cached_streaming_session
+				.as_ref()
+				.expect("session not cached")
+				.session
+				.clone();                            // `Proxy` is `Clone`
+
+			let shm  = ext.shm.as_ref().unwrap().clone();     // `Proxy`s are `Clone`
+			let qh   = ext.qh.as_ref().unwrap().clone();      // `QueueHandle` is `Clone`
+
+			(evq, sess, shm, qh)
+		}; // <-- the &mut borrow of `ext_image` ends right here
+
+		//------------------------------ 3. build frame + bookkeeping ----------------------
+		let info_arc = Arc::new(RwLock::new(FrameFormat {
+			format: Format::Xrgb8888,
+			size:   Size { width: 0, height: 0 },
+			stride: 0,
 		}));
-		let session = capture_manager.create_session(&source, option.into(), qh, info.clone());
 
 		let capture_info = CaptureInfo::new();
-		let frame = session.create_frame(qh, capture_info.clone());
-		event_queue.blocking_dispatch(self).unwrap();
-		let qh = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.qh
-			.as_ref()
-			.expect("Should init");
-		let shm = self
-			.ext_image
-			.as_ref()
-			.expect("ext_image should be initialized")
-			.shm
-			.as_ref()
-			.expect("Should init");
-		let info = info.read().unwrap();
+		let frame        = session.create_frame(&qh, capture_info.clone());
 
-		// Use direct field access for FrameInfo
-		let Size { width, height } = info.size;
-		let frame_format = info.format;
+		//------------------------------ 4. first round-trip: compositor answers -----------
+		local_evq.blocking_dispatch(self)?;   // ← no competing borrow now
+
+		let info_guard   = info_arc.read().unwrap();
+		let Size { width, height } = info_guard.size;
+		let frame_format = info_guard.format;
+
 		if !matches!(
-			frame_format,
-			Format::Xbgr2101010
-				| Format::Xrgb2101010
-				| Format::Abgr2101010
-				| Format::Argb8888
-				| Format::Xrgb8888
-				| Format::Xbgr8888
-				| Format::Bgr888
-		) {
-			println!("Unsupported format: {:?}", frame_format);
-			return Err(crate::WayshotError::NotSupportFormat);
-		} else {
-			println!("Matched format: {:?}", frame_format);
+        frame_format,
+        Format::Xbgr2101010
+        | Format::Xrgb2101010
+        | Format::Abgr2101010
+        | Format::Argb8888
+        | Format::Xrgb8888
+        | Format::Xbgr8888
+        | Format::Bgr888
+    ) {
+			return Err(WayshotError::NotSupportFormat);
 		}
 
-		let frame_bytes = 4 * height * width;
-		let mem_fd = fd.as_fd();
-
-		if let Some(file) = file {
-			file.set_len(frame_bytes as u64).unwrap();
+		//------------------------------ 5. allocate shm buffer -----------------------------
+		let byte_len = 4 * width * height;
+		if let Some(f) = file {
+			f.set_len(byte_len as u64)?;
 		}
 
-		let stride = 4 * width;
-
-		let shm_pool = shm.create_pool(mem_fd, (width * height * 4) as i32, qh, ());
-		let buffer = shm_pool.create_buffer(
+		let stride    = 4 * width;
+		let shm_pool  = shm.create_pool(fd.as_fd(), byte_len as i32, &qh, ());
+		let buffer    = shm_pool.create_buffer(
 			0,
-			width as i32,
+			width  as i32,
 			height as i32,
 			stride as i32,
 			frame_format,
-			qh,
+			&qh,
 			(),
 		);
+
 		frame.attach_buffer(&buffer);
 		frame.capture();
 
+		//------------------------------ 6. wait until frame finished -----------------------
 		let transform;
 		loop {
-			event_queue.blocking_dispatch(self)?;
-			let info = capture_info.read().unwrap();
-			match info.state() {
-				FrameState::Succeeded => {
-					transform = info.transform();
-					break;
-				}
-				FrameState::Failed(info) => match info {
-					Some(WEnum::Value(reason)) => match reason {
-						wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::Stopped => {
-							return Err(crate::WayshotError::CaptureFailed("Stopped".to_owned()));
-						}
+			local_evq.blocking_dispatch(self)?; // <- still safe
 
-						wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::BufferConstraints => {
-							return Err(crate::WayshotError::CaptureFailed(
-								"BufferConstraints".to_owned(),
-							));
-						}
-						wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::Unknown | _ => {
-							return Err(crate::WayshotError::CaptureFailed("Unknown".to_owned()));
-						}
-					},
-					Some(WEnum::Unknown(code)) => {
-						return Err(crate::WayshotError::CaptureFailed(format!(
-							"Unknown reason, code : {code}"
-						)));
-					}
-					None => {
-						return Err(crate::WayshotError::CaptureFailed(
-							"No failure reason provided".to_owned(),
-						));
-					}
-				},
-				FrameState::Pending => {}
+			match capture_info.read().unwrap().state() {
+				FrameState::Succeeded        => { transform = capture_info.read().unwrap().transform(); break; }
+				FrameState::Pending          => {}   // keep spinning
+				FrameState::Failed(reason)   => {
+					use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::*;
+					let msg = match reason {
+						Some(WEnum::Value(BufferConstraints)) => "BufferConstraints",
+						Some(WEnum::Value(Stopped))           => "Stopped",
+						_                                     => "Unknown"
+					};
+					return Err(WayshotError::CaptureFailed(msg.into()));
+				}
 			}
 		}
 
-		self.reset_event_queue(event_queue);
+		//------------------------------ 7. give event queue back ---------------------------
+		// `local_evq` owns the queue; move it back so the cache stays valid.
+		self.ext_image
+			.as_mut()
+			.unwrap()
+			.event_queue = Some(local_evq);
 
+		//------------------------------ 8. build return struct -----------------------------
 		Ok(CaptureOutputData {
-			output,
+			output:          output_info.output,
 			buffer,
-			logical_region: logical_region.clone(),
-			frame_info: FrameFormat {
+			logical_region:  output_info.logical_region.clone(),
+			frame_info:      FrameFormat {
 				format: frame_format,
-				size: Size {
-					width: logical_region.inner.size.width as u32,
-					height: logical_region.inner.size.height as u32,
-				},
+				size:   Size { width, height },
 				stride,
 			},
 			transform,
-			color_type: ColorType::Rgba8, // placeholder, will be set after conversion
-			physical_size: Size {
-				width: logical_region.inner.size.width as u32,
-				height: logical_region.inner.size.height as u32,
-			},
-			mmap: None, // Initialize mmap as None
+			color_type:      ColorType::Rgba8,  // overwritten later by caller
+			physical_size:   Size { width, height },
+			mmap:            None,
 		})
+	}
+
+	/// Clear cached streaming session (call when switching outputs or ending stream)
+	pub fn clear_streaming_cache(&mut self) {
+		if let Some(ext_image) = self.ext_image.as_mut() {
+			ext_image.cached_streaming_session = None;
+		}
+	}
+
+	/// Replace the old streaming functions with deprecated warnings
+	#[deprecated(since = "1.0.0", note = "Use ext_capture_streaming instead for better performance")]
+	pub fn ext_capture_single_output_streaming(
+		&mut self,
+		option: CaptureOption,
+		output: crate::output::OutputInfo,
+	) -> std::result::Result<DynamicImage, crate::WayshotError> {
+		// Fallback to optimized version
+		self.ext_capture_single_output_streaming_optimized(option, output)
 	}
 }
