@@ -114,7 +114,7 @@ fn main() -> Result<()> {
 
     let testing = true; // Change to false to force wlr_screencopy
 
-	let frame = 100;
+	let frame = 3;
 
     match connection_result {
         Ok(mut state) => {
@@ -173,6 +173,7 @@ fn main() -> Result<()> {
                                 for (idx, (image_buffer, _name)) in frames.into_iter().enumerate() {
                                     let mut path = f.clone();
                                     let new_name = format!("{}_frame{}.{}", stem, idx, ext);
+									println!("ITS USING STREAMING!");
                                     path.set_file_name(new_name);
                                     // Spawn a thread to save the frame while capturing continues
                                     let handle = std::thread::spawn(move || {

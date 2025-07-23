@@ -95,6 +95,7 @@ use crate::region::Region;
 pub struct StreamingSession {
 	pub source: ExtImageCaptureSourceV1,
 	pub session: ExtImageCopyCaptureSessionV1,
+	pub info: std::sync::Arc<std::sync::RwLock<FrameFormat>>,   // ← NEW
 	pub output_info: crate::output::OutputInfo,
 }
 

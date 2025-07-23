@@ -720,7 +720,6 @@ impl crate::WayshotConnection {
 	) -> crate::Result<()> {
 		let ext_image = self.ext_image.as_mut().expect("ext_image should be initialized");
 
-		// Check if we have a cached session for this output
 		let need_new_session = match &ext_image.cached_streaming_session {
 			Some(cached) => cached.output_info != *output_info,
 			None => true,
@@ -728,27 +727,29 @@ impl crate::WayshotConnection {
 
 		if need_new_session {
 			let cloned_info = output_info.clone();
-			let img_manager = ext_image.output_image_manager.as_ref().expect("Should init");
-			let capture_manager = ext_image.img_copy_manager.as_ref().expect("Should init");
-			let qh = ext_image.qh.as_ref().expect("Should init");
+			let img_manager      = ext_image.output_image_manager.as_ref().expect("init");
+			let capture_manager  = ext_image.img_copy_manager.as_ref().expect("init");
+			let qh               = ext_image.qh.as_ref().expect("init");
 
+			// identical to non-streaming path
 			let source = img_manager.create_source(&output_info.output, qh, ());
-			let info = Arc::new(RwLock::new(FrameFormat {
+			let info   = Arc::new(RwLock::new(FrameFormat {
 				format: Format::Xrgb8888,
-				size: Size { width: 0, height: 0 },
+				size:   Size { width: 0, height: 0 },
 				stride: 0,
 			}));
-			let session = capture_manager.create_session(&source, option.into(), qh, info);
+			let session = capture_manager.create_session(&source, option.into(), qh, info.clone());
 
 			ext_image.cached_streaming_session = Some(crate::StreamingSession {
 				source,
 				session,
+				info,                 // ← cache it
 				output_info: cloned_info,
 			});
 		}
-
 		Ok(())
 	}
+
 
 	/// Streaming capture: capture N frames from the selected output with optimized globals reuse
 	pub fn ext_capture_streaming(
@@ -826,74 +827,54 @@ impl crate::WayshotConnection {
 		fd: T,
 		file: Option<&File>,
 	) -> Result<CaptureOutputData, WayshotError> {
-		use wayland_client::protocol::wl_shm::Format;
-
-		//------------------------------ 1. ensure session ---------------------------------
+		// ── 1. ensure cached session ────────────────────────────────────────────────
 		self.get_or_create_streaming_session(&output_info, option)?;
 
-		//------------------------------ 2. pull things out of  self.ext_image --------------
-		// Everything we need is cloned / moved **out** so the borrow ends immediately.
+		// ── 2. pull everything *once* so the &mut borrow ends immediately ───────────
 		let (
-			mut local_evq,              // `EventQueue`
-			session,                    // `ExtImageCopyCaptureSessionV1`
-			shm,                        // `WlShm`
-			qh                          // `QueueHandle<WayshotConnection>`
+			mut local_evq,
+			session,
+			shm,
+			qh,
+			info,                 // ← the FrameFormat handle we cached
 		) = {
-			let ext = self.ext_image.as_mut().expect("ext_image not init");
+			let ext = self.ext_image.as_mut().expect("no ext_image");
 
-			let evq  = ext.event_queue.take().expect("event_queue missing");
-			let sess = ext
-				.cached_streaming_session
-				.as_ref()
-				.expect("session not cached")
-				.session
-				.clone();                            // `Proxy` is `Clone`
+			let evq  = ext.event_queue.take().expect("no event_queue");
+			let ses  = ext.cached_streaming_session.as_ref().unwrap().session.clone();
+			let shm  = ext.shm.as_ref().unwrap().clone();
+			let qh   = ext.qh.as_ref().unwrap().clone();
+			let info = ext.cached_streaming_session.as_ref().unwrap().info.clone();
 
-			let shm  = ext.shm.as_ref().unwrap().clone();     // `Proxy`s are `Clone`
-			let qh   = ext.qh.as_ref().unwrap().clone();      // `QueueHandle` is `Clone`
+			(evq, ses, shm, qh, info)
+		}; // borrow of ext_image ends here
 
-			(evq, sess, shm, qh)
-		}; // <-- the &mut borrow of `ext_image` ends right here
-
-		//------------------------------ 3. build frame + bookkeeping ----------------------
-		let info_arc = Arc::new(RwLock::new(FrameFormat {
-			format: Format::Xrgb8888,
-			size:   Size { width: 0, height: 0 },
-			stride: 0,
-		}));
-
+		// ── 3. identical bookkeeping to non-streaming ───────────────────────────────
 		let capture_info = CaptureInfo::new();
 		let frame        = session.create_frame(&qh, capture_info.clone());
 
-		//------------------------------ 4. first round-trip: compositor answers -----------
-		local_evq.blocking_dispatch(self)?;   // ← no competing borrow now
-
-		let info_guard   = info_arc.read().unwrap();
+		// first round-trip for size/format
+		local_evq.blocking_dispatch(self)?;
+		let info_guard   = info.read().unwrap();
 		let Size { width, height } = info_guard.size;
 		let frame_format = info_guard.format;
 
 		if !matches!(
         frame_format,
-        Format::Xbgr2101010
-        | Format::Xrgb2101010
-        | Format::Abgr2101010
-        | Format::Argb8888
-        | Format::Xrgb8888
-        | Format::Xbgr8888
-        | Format::Bgr888
+        Format::Xbgr2101010 | Format::Xrgb2101010 | Format::Abgr2101010 |
+        Format::Argb8888   | Format::Xrgb8888   | Format::Xbgr8888    |
+        Format::Bgr888
     ) {
 			return Err(WayshotError::NotSupportFormat);
 		}
 
-		//------------------------------ 5. allocate shm buffer -----------------------------
-		let byte_len = 4 * width * height;
-		if let Some(f) = file {
-			f.set_len(byte_len as u64)?;
-		}
+		// hard-coded 4 Bpp – same as non-streaming
+		let frame_bytes = 4 * height * width;
+		if let Some(f) = file { f.set_len(frame_bytes as u64)?; }
 
-		let stride    = 4 * width;
-		let shm_pool  = shm.create_pool(fd.as_fd(), byte_len as i32, &qh, ());
-		let buffer    = shm_pool.create_buffer(
+		let stride   = 4 * width;
+		let shm_pool = shm.create_pool(fd.as_fd(), frame_bytes as i32, &qh, ());
+		let buffer   = shm_pool.create_buffer(
 			0,
 			width  as i32,
 			height as i32,
@@ -906,47 +887,45 @@ impl crate::WayshotConnection {
 		frame.attach_buffer(&buffer);
 		frame.capture();
 
-		//------------------------------ 6. wait until frame finished -----------------------
+		// ── 4. wait for completion – unchanged ──────────────────────────────────────
 		let transform;
 		loop {
-			local_evq.blocking_dispatch(self)?; // <- still safe
-
+			local_evq.blocking_dispatch(self)?;
 			match capture_info.read().unwrap().state() {
-				FrameState::Succeeded        => { transform = capture_info.read().unwrap().transform(); break; }
-				FrameState::Pending          => {}   // keep spinning
-				FrameState::Failed(reason)   => {
+				FrameState::Succeeded => {
+					transform = capture_info.read().unwrap().transform();
+					break;
+				}
+				FrameState::Pending  => {}
+				FrameState::Failed(r) => {
 					use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::*;
-					let msg = match reason {
+					let msg = match r {
 						Some(WEnum::Value(BufferConstraints)) => "BufferConstraints",
 						Some(WEnum::Value(Stopped))           => "Stopped",
-						_                                     => "Unknown"
+						_                                     => "Unknown",
 					};
 					return Err(WayshotError::CaptureFailed(msg.into()));
 				}
 			}
 		}
 
-		//------------------------------ 7. give event queue back ---------------------------
-		// `local_evq` owns the queue; move it back so the cache stays valid.
-		self.ext_image
-			.as_mut()
-			.unwrap()
-			.event_queue = Some(local_evq);
+		// ── 5. put the queue back for next frame ────────────────────────────────────
+		self.ext_image.as_mut().unwrap().event_queue = Some(local_evq);
 
-		//------------------------------ 8. build return struct -----------------------------
+		// ── 6. build result – unchanged ─────────────────────────────────────────────
 		Ok(CaptureOutputData {
-			output:          output_info.output,
+			output: output_info.output,
 			buffer,
-			logical_region:  output_info.logical_region.clone(),
-			frame_info:      FrameFormat {
+			logical_region: output_info.logical_region.clone(),
+			frame_info: FrameFormat {
 				format: frame_format,
 				size:   Size { width, height },
 				stride,
 			},
 			transform,
-			color_type:      ColorType::Rgba8,  // overwritten later by caller
-			physical_size:   Size { width, height },
-			mmap:            None,
+			color_type: ColorType::Rgba8,   // will be overwritten by caller
+			physical_size: Size { width, height },
+			mmap: None,
 		})
 	}
 
