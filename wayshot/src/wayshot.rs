@@ -114,7 +114,7 @@ fn main() -> Result<()> {
 
     let testing = true; // Change to false to force wlr_screencopy
 
-	let frame = 3;
+	let frame = 10;
 
     match connection_result {
         Ok(mut state) => {
@@ -160,34 +160,22 @@ fn main() -> Result<()> {
                 } else if cli.toplevel {
                     ext_capture_toplevel(&mut state, stdout_print, cursor).map(|(img, name)| (img, WayshotResult::ToplevelCaptured { name }))
                 } else if cli.streaming {
-                    // Streaming: capture frames one-by-one, save each in parallel as soon as it's captured
-                    let frames_result = state
-                        .ext_capture_streaming(output.clone(), stdout_print, cursor, frame)
+                    // Streaming: print the frame number as soon as it's captured using the iterator
+                    let iter_result = state.ext_capture_streaming_iter(output.clone(), cursor, frame)
                         .map_err(|e| ext_wayshot::WayshotImageWriteError::WaylandError(e));
-                    match frames_result {
-                        Ok(frames) => {
-                            if let Some(f) = file.as_ref() {
-                                let stem = f.file_stem().unwrap_or_default().to_string_lossy().to_string();
-                                let ext = f.extension().unwrap_or_default().to_string_lossy().to_string();
-                                let mut handles = Vec::with_capacity(frames.len());
-                                for (idx, (image_buffer, _name)) in frames.into_iter().enumerate() {
-                                    let mut path = f.clone();
-                                    let new_name = format!("{}_frame{}.{}", stem, idx, ext);
-									println!("ITS USING STREAMING!");
-                                    path.set_file_name(new_name);
-                                    // Spawn a thread to save the frame while capturing continues
-                                    let handle = std::thread::spawn(move || {
-                                        if let Err(e) = image_buffer.save(&path) {
-                                            eprintln!("Failed to save file '{}': {}", path.display(), e);
-                                        }
-                                    });
-                                    handles.push(handle);
-                                    // Capturing continues immediately to next frame
+                    match iter_result {
+                        Ok(mut streaming_iter) => {
+                            let mut idx = 0;
+                            while let Some(frame_result) = streaming_iter.next() {
+                                match frame_result {
+                                    Ok((_image_buffer, _name)) => {
+                                        println!("Captured frame {}", idx);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to capture frame {}: {}", idx, e);
+                                    }
                                 }
-                                // Wait for all save threads to finish
-                                for handle in handles {
-                                    let _ = handle.join();
-                                }
+                                idx += 1;
                             }
                             return Ok(());
                         }
