@@ -818,8 +818,6 @@ impl crate::WayshotConnection {
 	}
 
 
-	/// Optimised inner capture that re-uses globals *and* keeps the borrow
-	/// checker happy.
 	fn ext_capture_output_inner_streaming_optimized<T: AsFd>(
 		&mut self,
 		output_info: crate::output::OutputInfo,
@@ -836,14 +834,14 @@ impl crate::WayshotConnection {
 			session,
 			shm,
 			qh,
-			info,                 // ← the FrameFormat handle we cached
+			info, // ← the FrameFormat handle we cached
 		) = {
 			let ext = self.ext_image.as_mut().expect("no ext_image");
 
-			let evq  = ext.event_queue.take().expect("no event_queue");
-			let ses  = ext.cached_streaming_session.as_ref().unwrap().session.clone();
-			let shm  = ext.shm.as_ref().unwrap().clone();
-			let qh   = ext.qh.as_ref().unwrap().clone();
+			let evq = ext.event_queue.take().expect("no event_queue");
+			let ses = ext.cached_streaming_session.as_ref().unwrap().session.clone();
+			let shm = ext.shm.as_ref().unwrap().clone();
+			let qh = ext.qh.as_ref().unwrap().clone();
 			let info = ext.cached_streaming_session.as_ref().unwrap().info.clone();
 
 			(evq, ses, shm, qh, info)
@@ -851,32 +849,44 @@ impl crate::WayshotConnection {
 
 		// ── 3. identical bookkeeping to non-streaming ───────────────────────────────
 		let capture_info = CaptureInfo::new();
-		let frame        = session.create_frame(&qh, capture_info.clone());
+		let frame = session.create_frame(&qh, capture_info.clone());
 
 		// first round-trip for size/format
 		local_evq.blocking_dispatch(self)?;
-		let info_guard   = info.read().unwrap();
+
+		// CRITICAL FIX: Add flush after the first dispatch
+		self.conn.flush().unwrap();
+
+		let info_guard = info.read().unwrap();
 		let Size { width, height } = info_guard.size;
 		let frame_format = info_guard.format;
 
 		if !matches!(
         frame_format,
         Format::Xbgr2101010 | Format::Xrgb2101010 | Format::Abgr2101010 |
-        Format::Argb8888   | Format::Xrgb8888   | Format::Xbgr8888    |
+        Format::Argb8888 | Format::Xrgb8888 | Format::Xbgr8888 |
         Format::Bgr888
     ) {
+			// ── CRITICAL: Put event queue back even on error ────────────────────────
+			self.ext_image.as_mut().unwrap().event_queue = Some(local_evq);
 			return Err(WayshotError::NotSupportFormat);
 		}
 
 		// hard-coded 4 Bpp – same as non-streaming
 		let frame_bytes = 4 * height * width;
-		if let Some(f) = file { f.set_len(frame_bytes as u64)?; }
+		if let Some(f) = file {
+			if let Err(e) = f.set_len(frame_bytes as u64) {
+				// ── Put event queue back on file error ──────────────────────────────
+				self.ext_image.as_mut().unwrap().event_queue = Some(local_evq);
+				return Err(e.into());
+			}
+		}
 
-		let stride   = 4 * width;
+		let stride = 4 * width;
 		let shm_pool = shm.create_pool(fd.as_fd(), frame_bytes as i32, &qh, ());
-		let buffer   = shm_pool.create_buffer(
+		let buffer = shm_pool.create_buffer(
 			0,
-			width  as i32,
+			width as i32,
 			height as i32,
 			stride as i32,
 			frame_format,
@@ -885,7 +895,12 @@ impl crate::WayshotConnection {
 		);
 
 		frame.attach_buffer(&buffer);
+
 		frame.capture();
+
+		// ── now flush your capture request ───────────────────────────
+		self.conn.flush().unwrap();
+
 
 		// ── 4. wait for completion – unchanged ──────────────────────────────────────
 		let transform;
@@ -896,20 +911,22 @@ impl crate::WayshotConnection {
 					transform = capture_info.read().unwrap().transform();
 					break;
 				}
-				FrameState::Pending  => {}
+				FrameState::Pending => {}
 				FrameState::Failed(r) => {
 					use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::*;
 					let msg = match r {
 						Some(WEnum::Value(BufferConstraints)) => "BufferConstraints",
-						Some(WEnum::Value(Stopped))           => "Stopped",
-						_                                     => "Unknown",
+						Some(WEnum::Value(Stopped)) => "Stopped",
+						_ => "Unknown",
 					};
+					// ── Put event queue back on capture failure ─────────────────────────
+					self.ext_image.as_mut().unwrap().event_queue = Some(local_evq);
 					return Err(WayshotError::CaptureFailed(msg.into()));
 				}
 			}
 		}
 
-		// ── 5. put the queue back for next frame ────────────────────────────────────
+		// ── 5. CRITICAL: ALWAYS put the queue back for next frame ───────────────────
 		self.ext_image.as_mut().unwrap().event_queue = Some(local_evq);
 
 		// ── 6. build result – unchanged ─────────────────────────────────────────────
@@ -919,11 +936,11 @@ impl crate::WayshotConnection {
 			logical_region: output_info.logical_region.clone(),
 			frame_info: FrameFormat {
 				format: frame_format,
-				size:   Size { width, height },
+				size: Size { width, height },
 				stride,
 			},
 			transform,
-			color_type: ColorType::Rgba8,   // will be overwritten by caller
+			color_type: ColorType::Rgba8, // will be overwritten by caller
 			physical_size: Size { width, height },
 			mmap: None,
 		})
@@ -945,5 +962,69 @@ impl crate::WayshotConnection {
 	) -> std::result::Result<DynamicImage, crate::WayshotError> {
 		// Fallback to optimized version
 		self.ext_capture_single_output_streaming_optimized(option, output)
+	}
+}
+
+/// An iterator that yields `Result<(DynamicImage, String), WayshotError>` for each captured frame.
+pub struct StreamingIterator<'a> {
+	conn: &'a mut WayshotConnection,
+	output_name: String,
+	output_info: crate::output::OutputInfo,
+	capture_option: CaptureOption,
+	frames_remaining: usize,
+}
+
+impl<'a> Iterator for StreamingIterator<'a> {
+	type Item = Result<(DynamicImage, String), WayshotError>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.frames_remaining == 0 {
+			return None;
+		}
+		// Capture a single frame via the optimized streaming API:
+		let result = self.conn
+			.ext_capture_single_output_streaming_optimized(
+				self.capture_option,
+				self.output_info.clone(), // clone OutputInfo cheaply
+			)
+			.map(|img| (img, self.output_name.clone()));
+		self.frames_remaining -= 1;
+		Some(result)
+	}
+}
+
+impl WayshotConnection {
+	/// Real-time streaming: returns an iterator yielding each frame as soon as ready.
+	pub fn ext_capture_streaming_iter(
+		&mut self,
+		output: Option<String>,
+		pointer: bool,
+		frame_count: usize,
+	) -> Result<StreamingIterator<'_>, WayshotError> {
+		// Determine which output to use:
+		let outputs = self.vector_of_Outputs();
+		let idx = match output {
+			Some(ref name) => outputs
+				.iter()
+				.position(|info| &info.name == name)
+				.ok_or_else(|| WayshotError::CaptureFailed(format!("Output '{}' not found", name)))?,
+			None => 0,
+		};
+		let output_info = outputs[idx].clone();
+		let output_name = output_info.name.clone();
+		let capture_option = if pointer {
+			CaptureOption::PaintCursors
+		} else {
+			CaptureOption::None
+		};
+		// Ensure streaming session is initialized for reuse:
+		self.get_or_create_streaming_session(&output_info, capture_option)?;
+		Ok(StreamingIterator {
+			conn: self,
+			output_info,
+			output_name,
+			capture_option,
+			frames_remaining: frame_count,
+		})
 	}
 }

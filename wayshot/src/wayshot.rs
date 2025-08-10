@@ -114,7 +114,7 @@ fn main() -> Result<()> {
 
     let testing = true; // Change to false to force wlr_screencopy
 
-	let frame = 10;
+	let frame = 1000;
 
     match connection_result {
         Ok(mut state) => {
