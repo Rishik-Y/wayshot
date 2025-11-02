@@ -46,6 +46,10 @@ use wayland_protocols::{
     xdg::xdg_output::zv1::client::{
         zxdg_output_manager_v1::ZxdgOutputManagerV1, zxdg_output_v1::ZxdgOutputV1,
     },
+    ext::image_copy_capture::v1::client::{
+        ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1,
+        ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
+    },
 };
 use wayland_protocols_wlr::{
     layer_shell::v1::client::{
@@ -76,10 +80,15 @@ use crate::ext_image_protocols::TopLevel;
 use gbm::{BufferObject, BufferObjectFlags, Device as GBMDevice};
 use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;
 use wayland_protocols::ext::image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1;
-use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
 use wayland_protocols::ext::image_capture_source::v1::client::ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1;
 use wayland_protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
 use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1;
+
+/// Enum to represent either wlr-screencopy or ext-image-copy-capture frame
+pub enum WayshotFrame {
+    WlrScreenshot(ZwlrScreencopyFrameV1),
+    ExtImageCopy(ExtImageCopyCaptureFrameV1),
+}
 
 /// Struct to store wayland connection and globals list.
 /// # Example usage
