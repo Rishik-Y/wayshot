@@ -131,136 +131,32 @@ pub struct WayshotConnection {
 
 impl WayshotConnection {
     pub fn new() -> Result<Self> {
-        // Try to use ext_image protocol first
-        match Self::create_connection(None, true) {
-            Ok(connection) => {
-                tracing::debug!("Successfully created connection with ext_image protocol");
-                Ok(connection)
-            }
-            Err(err) => {
-                tracing::debug!(
-                    "ext_image protocol not available ({}), falling back to wlr-screencopy",
-                    err
-                );
-                // Fall back to wlr_screencopy
-                Self::create_connection(None, false)
-            }
-        }
+        let conn = Connection::connect_to_env()?;
+        Self::from_connection(conn)
     }
 
     /// Recommended if you already have a [`wayland_client::Connection`].
-    /// Internal function that handles connection creation with protocol selection
-    fn create_connection(
-        connection: Option<Connection>,
-        use_ext_image: bool,
-    ) -> Result<Self, Error> {
-        let conn = if let Some(conn) = connection {
-            conn
-        } else {
-            Connection::connect_to_env()?
-        };
+    pub fn from_connection(conn: Connection) -> Result<Self> {
+        let (globals, _) = registry_queue_init::<WayshotState>(&conn)?;
 
-        let (globals, mut event_queue) = registry_queue_init::<WayshotConnection>(&conn)?;
-
-        // Create a base WayshotConnection with common fields
         let mut initial_state = Self {
             conn,
             globals,
             output_infos: Vec::new(),
             dmabuf_state: None,
-            ext_image: if use_ext_image {
-                Some(ExtBase {
-                    toplevels: Vec::new(),
-                    img_copy_manager: None,
-                    output_image_manager: None,
-                    shm: None,
-                    qh: None,
-                    event_queue: None,
-                    toplevel_image_manager: None,
-                    cached_streaming_session: None,
-                })
-            } else {
-                None
-            },
+            ext_image: Some(ExtBase {
+                toplevels: Vec::new(),
+                img_copy_manager: None,
+                output_image_manager: None,
+                shm: None,
+                qh: None,
+                event_queue: None,
+                toplevel_image_manager: None,
+                cached_streaming_session: None,
+            }),
         };
 
-        // Refresh outputs which is needed for both protocols
         initial_state.refresh_outputs()?;
-
-        // If using ext_image protocol, initialize the specific components
-        if use_ext_image {
-            let qh = event_queue.handle();
-
-            // Bind to ext_image specific globals
-            match initial_state
-                .globals
-                .bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())
-            {
-                Ok(image_manager) => {
-                    match initial_state
-                        .globals
-                        .bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())
-                    {
-                        Ok(output_image_manager) => {
-                            // Binding for toplevel_image_manager here
-                            let toplevel_image_manager = initial_state
-                                .globals
-                                .bind::<ExtForeignToplevelImageCaptureSourceManagerV1, _, _>(
-                                    &qh,
-                                    1..=1,
-                                    (),
-                                )
-                                .ok();
-
-                            match initial_state.globals.bind::<WlShm, _, _>(&qh, 1..=2, ()) {
-                                Ok(shm) => {
-                                    // Try to bind to toplevel list, but don't fail if not available
-                                    let _ = initial_state
-                                        .globals
-                                        .bind::<ExtForeignToplevelListV1, _, _>(&qh, 1..=1, ());
-
-                                    // Process events to ensure all bound globals are initialized
-                                    event_queue.blocking_dispatch(&mut initial_state)?;
-
-                                    // Set toplevel_image_manager if available
-                                    if let Some(toplevel_image_manager) = toplevel_image_manager
-                                        && let Some(state) = initial_state.ext_image.as_mut()
-                                    {
-                                        state
-                                            .toplevel_image_manager
-                                            .replace(toplevel_image_manager);
-                                    }
-
-                                    // Store the globals we fetched
-                                    if let Some(ext_image) = initial_state.ext_image.as_mut() {
-                                        ext_image.img_copy_manager = Some(image_manager);
-                                        ext_image.output_image_manager = Some(output_image_manager);
-                                        ext_image.qh = Some(qh);
-                                        ext_image.shm = Some(shm);
-                                        ext_image.event_queue = Some(event_queue);
-                                    }
-                                }
-                                Err(_) => {
-                                    return Err(Error::ProtocolNotFound(
-                                        "WlShm not found".to_string(),
-                                    ));
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            return Err(Error::ProtocolNotFound(
-                                "ExtOutputImageCaptureSourceManagerV1 not found".to_string(),
-                            ));
-                        }
-                    }
-                }
-                Err(_) => {
-                    return Err(Error::ProtocolNotFound(
-                        "ExtImageCopyCaptureManagerV1 not found".to_string(),
-                    ));
-                }
-            }
-        }
 
         Ok(initial_state)
     }
