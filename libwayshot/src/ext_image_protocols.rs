@@ -88,7 +88,7 @@ impl CaptureInfo {
     pub(crate) fn new() -> Arc<RwLock<Self>> {
         Arc::new(RwLock::new(Self {
             transform: wl_output::Transform::Normal,
-            state: FrameState::Pending,
+            state: FrameState::Finished, // Default value, will be updated by events
         }))
     }
 
@@ -477,37 +477,13 @@ impl crate::WayshotConnection {
             event_queue.blocking_dispatch(self)?;
             let info = capture_info.read().unwrap();
             match info.state() {
-				FrameState::Succeeded => {
+				FrameState::Finished => {
 					transform = info.transform();
 					break;
 				}
-				FrameState::Failed(info) => match info {
-					Some(WEnum::Value(reason)) => match reason {
-						wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::Stopped => {
-							return Err(crate::Error::CaptureFailed("Stopped".to_owned()));
-						}
-
-						wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::BufferConstraints => {
-							return Err(crate::Error::CaptureFailed(
-								"BufferConstraints".to_owned(),
-							));
-						}
-						wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason::Unknown | _ => {
-							return Err(crate::Error::CaptureFailed("Unknown".to_owned()));
-						}
-					},
-					Some(WEnum::Unknown(code)) => {
-						return Err(crate::Error::CaptureFailed(format!(
-							"Unknown reason, code : {code}"
-						)));
-					}
-					None => {
-						return Err(crate::Error::CaptureFailed(
-							"No failure reason provided".to_owned(),
-						));
-					}
-				},
-				FrameState::Pending => {}
+				FrameState::Failed => {
+					return Err(crate::Error::CaptureFailed("Capture failed".to_owned()));
+				}
 			}
         }
 
@@ -640,35 +616,13 @@ impl crate::WayshotConnection {
             event_queue.blocking_dispatch(self)?;
             let info = capture_info.read().unwrap();
             match info.state() {
-                FrameState::Succeeded => {
+                FrameState::Finished => {
                     transform = info.transform();
                     break;
                 }
-                FrameState::Failed(info) => match info {
-                    Some(WEnum::Value(reason)) => match reason {
-                        FailureReason::Stopped => {
-                            return Err(Error::CaptureFailed("Stopped".to_owned()));
-                        }
-
-                        FailureReason::BufferConstraints => {
-                            return Err(Error::CaptureFailed("BufferConstraints".to_owned()));
-                        }
-                        FailureReason::Unknown | _ => {
-                            return Err(Error::CaptureFailed("Unknown".to_owned()));
-                        }
-                    },
-                    Some(WEnum::Unknown(code)) => {
-                        return Err(Error::CaptureFailed(format!(
-                            "Unknown reason, code : {code}"
-                        )));
-                    }
-                    None => {
-                        return Err(Error::CaptureFailed(
-                            "No failure reason provided".to_owned(),
-                        ));
-                    }
-                },
-                FrameState::Pending => {}
+                FrameState::Failed => {
+                    return Err(Error::CaptureFailed("Capture failed".to_owned()));
+                }
             }
         }
 

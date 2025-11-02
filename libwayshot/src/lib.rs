@@ -852,19 +852,16 @@ impl WayshotConnection {
                     // Basically reads, if frame state is not None then...
                     if let Some(state) = state.state {
                         match state {
-                            FrameState::Failed(_) => {
+                            FrameState::Failed => {
                                 tracing::error!("Frame copy failed");
                                 return Err(Error::FramecopyFailed);
                             }
-                            FrameState::Succeeded => {
+                            FrameState::Finished => {
                                 tracing::trace!("Frame copy finished");
 
                                 return Ok(DMAFrameGuard {
                                     buffer: dmabuf_wlbuf,
                                 });
-                            }
-                            FrameState::Pending => {
-                                // If still pending, continue the event loop to wait for status change
                             }
                         }
                     }
@@ -915,16 +912,13 @@ impl WayshotConnection {
             // Basically reads, if frame state is not None then...
             if let Some(state) = state.state {
                 match state {
-                    FrameState::Failed(_) => {
+                    FrameState::Failed => {
                         tracing::error!("Frame copy failed");
                         return Err(Error::FramecopyFailed);
                     }
-                    FrameState::Succeeded => {
+                    FrameState::Finished => {
                         tracing::trace!("Frame copy finished");
                         return Ok(FrameGuard { buffer, shm_pool });
-                    }
-                    FrameState::Pending => {
-                        // If still pending, continue the event loop to wait for status change
                     }
                 }
             }

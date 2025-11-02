@@ -183,15 +183,13 @@ impl Dispatch<ZxdgOutputV1, usize> for OutputCaptureState {
     }
 }
 
-/// State of the frame after attempting to copy its data to a buffer.
+/// State of the frame after attempting to copy it's data to a wl_buffer.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum FrameState {
     /// Compositor returned a failed event on calling `frame.copy`.
-    Failed(Option<WEnum<FailureReason>>),
+    Failed,
     /// Compositor sent a Ready event on calling `frame.copy`.
-    Succeeded,
-    /// Capture is still pending (not yet failed or succeeded).
-    Pending,
+    Finished,
 }
 
 pub struct CaptureFrameState {
@@ -256,10 +254,10 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for CaptureFrameState {
             zwlr_screencopy_frame_v1::Event::Ready { .. } => {
                 // If the frame is successfully copied, a “flags” and a “ready” events are sent. Otherwise, a “failed” event is sent.
                 // This is useful when we call .copy on the frame object.
-                frame.state.replace(FrameState::Succeeded);
+                frame.state.replace(FrameState::Finished);
             }
             zwlr_screencopy_frame_v1::Event::Failed => {
-                frame.state.replace(FrameState::Failed(None));
+                frame.state.replace(FrameState::Failed);
             }
             zwlr_screencopy_frame_v1::Event::Damage { .. } => {}
             zwlr_screencopy_frame_v1::Event::LinuxDmabuf {
@@ -523,10 +521,10 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, Arc<RwLock<CaptureInfo>>> for WayshotC
         let mut data = data.write().unwrap();
         match event {
             ext_image_copy_capture_frame_v1::Event::Ready => {
-                data.state = FrameState::Succeeded;
+                data.state = FrameState::Finished;
             }
             ext_image_copy_capture_frame_v1::Event::Failed { reason } => {
-                data.state = FrameState::Failed(Some(reason))
+                data.state = FrameState::Failed
             }
             ext_image_copy_capture_frame_v1::Event::Transform {
                 transform: WEnum::Value(transform),
