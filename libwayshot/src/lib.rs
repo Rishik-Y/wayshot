@@ -665,7 +665,7 @@ impl WayshotConnection {
         let output_management = self
             .globals
             .bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())
-            .expect("Should have");
+            .expect("Failed to bind ExtOutputImageCaptureSourceManagerV1");
         let source = output_management.create_source(output, &qh, ());
         let options = Options::from_bits(cursor_overlay.try_into().unwrap_or(0))
             .unwrap_or(Options::PaintCursors);
@@ -762,11 +762,6 @@ impl WayshotConnection {
         tracing::trace!("Selected frame buffer format: {:#?}", frame_format);
 
         Ok((state, event_queue, frame, frame_format))
-    }
-            "Received compositor frame buffer formats: {:#?}",
-            state.formats
-        );
-        Ok((state, event_queue, frame))
     }
 
     fn capture_output_frame_get_state_dmabuf(
