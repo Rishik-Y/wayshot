@@ -686,23 +686,23 @@ impl WayshotConnection {
         }
     }
 
-    fn capture_output_frame_get_state(
+    // This API is exposed to provide users with access to window manager (WM)
+    // information. For instance, enabling Vulkan in wlroots alters the display
+    // format. Consequently, using PipeWire to capture streams without knowing
+    // the current format can lead to color distortion. This function attempts
+    // a trial screenshot to determine the screen's properties.
+    fn capture_output_frame_get_state_wlr(
         &self,
+        mut state: CaptureFrameState,
+        mut event_queue: EventQueue<CaptureFrameState>,
         cursor_overlay: i32,
         output: &WlOutput,
         capture_region: Option<EmbeddedRegion>,
     ) -> Result<(
         CaptureFrameState,
         EventQueue<CaptureFrameState>,
-        ZwlrScreencopyFrameV1,
+        WayshotFrame,
     )> {
-        let mut state = CaptureFrameState {
-            formats: Vec::new(),
-            dmabuf_formats: Vec::new(),
-            state: None,
-            buffer_done: AtomicBool::new(false),
-        };
-        let mut event_queue = self.conn.new_event_queue::<CaptureFrameState>();
         let qh = event_queue.handle();
 
         // Instantiating screencopy manager.
@@ -723,7 +723,7 @@ impl WayshotConnection {
             }
         };
 
-        tracing::debug!("Capturing output...");
+        tracing::debug!("Capturing output(shm buffer)...");
         let frame = if let Some(embedded_region) = capture_region {
             screencopy_manager.capture_output_region(
                 cursor_overlay,
@@ -749,7 +749,83 @@ impl WayshotConnection {
             "Received compositor frame buffer formats: {:#?}",
             state.formats
         );
-        Ok((state, event_queue, frame))
+        Ok((state, event_queue, WayshotFrame::WlrScreenshot(frame)))
+    }
+
+    fn capture_output_frame_get_state_ext(
+        &self,
+        mut state: CaptureFrameState,
+        mut event_queue: EventQueue<CaptureFrameState>,
+        manager: ExtImageCopyCaptureManagerV1,
+        cursor_overlay: i32,
+        output: &WlOutput,
+    ) -> Result<(
+        CaptureFrameState,
+        EventQueue<CaptureFrameState>,
+        WayshotFrame,
+    )> {
+        use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
+        let qh = event_queue.handle();
+        let output_management = self
+            .globals
+            .bind::<ExtOutputImageCaptureSourceManagerV1, _, _>(&qh, 1..=1, ())
+            .expect("Should have");
+        let source = output_management.create_source(output, &qh, ());
+        let options = Options::from_bits(cursor_overlay.try_into().unwrap_or(0))
+            .unwrap_or(Options::PaintCursors);
+        let session = manager.create_session(&source, options, &qh, ());
+        let frame = session.create_frame(&qh, ());
+        event_queue.blocking_dispatch(&mut state)?;
+        tracing::trace!(
+            "Received compositor frame buffer formats: {:#?}",
+            state.formats
+        );
+
+        Ok((state, event_queue, WayshotFrame::ExtImageCopy(frame)))
+    }
+
+    // This API is exposed to provide users with access to window manager (WM)
+    // information. For instance, enabling Vulkan in wlroots alters the display
+    // format. Consequently, using PipeWire to capture streams without knowing
+    // the current format can lead to color distortion. This function attempts
+    // a trial screenshot to determine the screen's properties.
+    pub fn capture_output_frame_get_state(
+        &self,
+        cursor_overlay: i32,
+        output: &WlOutput,
+        capture_region: Option<EmbeddedRegion>,
+    ) -> Result<(
+        CaptureFrameState,
+        EventQueue<CaptureFrameState>,
+        WayshotFrame,
+    )> {
+        let state = CaptureFrameState {
+            formats: Vec::new(),
+            dmabuf_formats: Vec::new(),
+            state: None,
+            buffer_done: AtomicBool::new(false),
+        };
+        let event_queue = self.conn.new_event_queue::<CaptureFrameState>();
+        let qh = event_queue.handle();
+        match self
+            .globals
+            .bind::<ExtImageCopyCaptureManagerV1, _, _>(&qh, 1..=1, ())
+        {
+            Ok(manager) => self.capture_output_frame_get_state_ext(
+                state,
+                event_queue,
+                manager,
+                cursor_overlay,
+                output,
+            ),
+            Err(_) => self.capture_output_frame_get_state_wlr(
+                state,
+                event_queue,
+                cursor_overlay,
+                output,
+                capture_region,
+            ),
+        }
     }
 
     fn capture_output_frame_get_state_shm(
@@ -760,7 +836,7 @@ impl WayshotConnection {
     ) -> Result<(
         CaptureFrameState,
         EventQueue<CaptureFrameState>,
-        ZwlrScreencopyFrameV1,
+        WayshotFrame,
         FrameFormat,
     )> {
         let (state, event_queue, frame) =
@@ -790,6 +866,11 @@ impl WayshotConnection {
         tracing::trace!("Selected frame buffer format: {:#?}", frame_format);
 
         Ok((state, event_queue, frame, frame_format))
+    }
+            "Received compositor frame buffer formats: {:#?}",
+            state.formats
+        );
+        Ok((state, event_queue, frame))
     }
 
     fn capture_output_frame_get_state_dmabuf(
@@ -884,6 +965,24 @@ impl WayshotConnection {
 
     fn capture_output_frame_inner<T: AsFd>(
         &self,
+        state: CaptureFrameState,
+        event_queue: EventQueue<CaptureFrameState>,
+        frame: WayshotFrame,
+        frame_format: FrameFormat,
+        fd: T,
+    ) -> Result<FrameGuard> {
+        match frame {
+            WayshotFrame::WlrScreenshot(frame) => {
+                self.capture_output_frame_inner_wlr(state, event_queue, frame, frame_format, fd)
+            }
+            WayshotFrame::ExtImageCopy(frame) => {
+                self.capture_output_frame_inner_ext(state, event_queue, frame, frame_format, fd)
+            }
+        }
+    }
+
+    fn capture_output_frame_inner_wlr<T: AsFd>(
+        &self,
         mut state: CaptureFrameState,
         mut event_queue: EventQueue<CaptureFrameState>,
         frame: ZwlrScreencopyFrameV1,
@@ -916,6 +1015,61 @@ impl WayshotConnection {
 
         // Copy the pixel data advertised by the compositor into the buffer we just created.
         frame.copy(&buffer);
+        // On copy the Ready / Failed events are fired by the frame object, so here we check for them.
+        loop {
+            // Basically reads, if frame state is not None then...
+            if let Some(state) = state.state {
+                match state {
+                    FrameState::Failed => {
+                        tracing::error!("Frame copy failed");
+                        return Err(Error::FramecopyFailed);
+                    }
+                    FrameState::Finished => {
+                        tracing::trace!("Frame copy finished");
+                        return Ok(FrameGuard { buffer, shm_pool });
+                    }
+                }
+            }
+
+            event_queue.blocking_dispatch(&mut state)?;
+        }
+    }
+
+    fn capture_output_frame_inner_ext<T: AsFd>(
+        &self,
+        mut state: CaptureFrameState,
+        mut event_queue: EventQueue<CaptureFrameState>,
+        frame: ExtImageCopyCaptureFrameV1,
+        frame_format: FrameFormat,
+        fd: T,
+    ) -> Result<FrameGuard> {
+        // Connecting to wayland environment.
+        let qh = event_queue.handle();
+
+        // Instantiate shm global.
+        let shm = self.globals.bind::<WlShm, _, _>(&qh, 1..=1, ())?;
+        let shm_pool = shm.create_pool(
+            fd.as_fd(),
+            frame_format
+                .byte_size()
+                .try_into()
+                .map_err(|_| Error::BufferTooSmall)?,
+            &qh,
+            (),
+        );
+        let buffer = shm_pool.create_buffer(
+            0,
+            frame_format.size.width as i32,
+            frame_format.size.height as i32,
+            frame_format.stride as i32,
+            frame_format.format,
+            &qh,
+            (),
+        );
+
+        // Copy the pixel data advertised by the compositor into the buffer we just created.
+        frame.attach_buffer(&buffer);
+        frame.capture();
         // On copy the Ready / Failed events are fired by the frame object, so here we check for them.
         loop {
             // Basically reads, if frame state is not None then...
